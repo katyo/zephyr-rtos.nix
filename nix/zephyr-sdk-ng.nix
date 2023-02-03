@@ -1,6 +1,6 @@
 { stdenv, lib, hostPlatform, fetchurl, autoPatchelfHook, xz, python38, which
 , hidapi, libftdi1, libusb1, overrideOpenocd, cmake, wget, file
-, version ? "0.15.1", toolchains ? "all" }:
+, version ? "0.15.2", toolchains ? "all" }:
 
 let pname = "zephyr-sdk";
     system = lib.splitString "-" hostPlatform.system;
