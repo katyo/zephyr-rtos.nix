@@ -1,10 +1,9 @@
 versions ?= \
   0.14.0 \
-  0.14.1 \
   0.14.2 \
   0.15.0 \
-  0.15.1 \
-  0.15.2
+  0.15.2 \
+  0.16.0
 
 hosts ?= \
   linux-aarch64 \
@@ -36,6 +35,8 @@ toolchains ?= \
 hashes ?= \
   sha256
 
+exts ?= .tar.xz .tar.gz .7z .zip
+
 # args: version
 download_base = https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v$(1)
 
@@ -45,23 +46,23 @@ hash_url = $(call download_base,$(1))/$(2).sum
 # args: version, algo
 hash_file = $(1).$(2)
 
-# args: version, algo, file
-hash_get = $(shell grep $(3) $(call hash_file,$(1),$(2)) | cut -d ' ' -f 1 | xargs nix --extra-experimental-features nix-command hash to-sri --type sha256)
+# args: version, algo, file pfx
+hash_get = $(shell grep '$(3)[.]' $(call hash_file,$(1),$(2)) | sed -r 's/[[:space:]]+[^[:space:]]+$$//g' | xargs nix --extra-experimental-features nix-command hash to-sri --type sha256)
+
+# args: version, algo, file pfx
+file_get = $(shell grep '$(3)[.]' $(call hash_file,$(1),$(2)) | sed -r 's/^[^[:space:]]+[[:space:]]+//g')
 
 # args: host
-file_ext = $(if $(filter windows-%,$(1)),.zip,.tar.gz)
-
-# args: host
-hosttools_file = hosttools_$(1)$(call file_ext,$(1))
+hosttools_file = hosttools_$(1)
 
 # args: version, host
-sdk_full_file = zephyr-sdk-$(1)_$(2)$(call file_ext,$(2))
+sdk_full_file = zephyr-sdk-$(1)_$(2)
 
 # args: version, host
-sdk_min_file = zephyr-sdk-$(1)_$(2)_minimal$(call file_ext,$(2))
+sdk_min_file = zephyr-sdk-$(1)_$(2)_minimal
 
 # args: host, toolchain
-toolchain_file = toolchain_$(1)_$(2)$(call file_ext,$(1))
+toolchain_file = toolchain_$(1)_$(2)
 
 # args: func(version, host, toolchain)
 foreach_all = $(foreach version,$(versions),$(foreach host,$(hosts),$(foreach toolchain,$(toolchains),$(call $(1),$(version),$(host),$(toolchain)))))
@@ -87,30 +88,30 @@ show-toolchain-files:
 test: fetch-hash
 	@echo $(call hash_get,$(versions),sha256,$(call hosttools_file,linux-aarch64))
 
-# args: pfx, hash
-put_hash_helper = $(if $(2),echo '$(1) = "$(2)";' >> $@;)
+# args: ident, pfx, hash, file
+put_hash_helper = $(if $(3),printf '$(1)$(2) = {\n$(1)  file = "$(4)";\n$(1)  hash = "$(3)";\n$(1)};\n' >> $@;)
 
-# args: pfx, version, file
-put_hash = $(call put_hash_helper,$(1),$(call hash_get,$(2),sha256,$(3)))
+# args: ident, pfx, version, file pfx
+put_hash = $(call put_hash_helper,$(1),$(2),$(call hash_get,$(3),sha256,$(4)),$(call file_get,$(3),sha256,$(4)))
 
 .PHONY: zephyr-sdk-hash.nix
 gen-hash-map: zephyr-sdk-hash.nix
 zephyr-sdk-hash.nix: fetch-hash
-	@echo '{' > $@; \
-	$(foreach version,$(versions), \
+	@echo '{' > $@;
+	@$(foreach version,$(versions), \
 		echo '  "$(version)" = {' >> $@; \
 		$(foreach host,$(hosts), \
 			echo '    "$(host)" = {' >> $@; \
-			$(call put_hash,      hosttools,$(version),$(call hosttools_file,$(host))) \
-			$(call put_hash,      full,$(version),$(call sdk_full_file,$(version),$(host))) \
-			$(call put_hash,      minimal,$(version),$(call sdk_min_file,$(version),$(host))) \
+			$(call put_hash,      ,hosttools,$(version),$(call hosttools_file,$(host))) \
+			$(call put_hash,      ,full,$(version),$(call sdk_full_file,$(version),$(host))) \
+			$(call put_hash,      ,minimal,$(version),$(call sdk_min_file,$(version),$(host))) \
 			echo '      toolchains = {' >> $@; \
 			$(foreach toolchain,$(toolchains), \
-				$(call put_hash,        "$(toolchain)",$(version),$(call toolchain_file,$(host),$(toolchain))) \
+				$(call put_hash,        ,"$(toolchain)",$(version),$(call toolchain_file,$(host),$(toolchain))) \
 			) \
 			echo '      };' >> $@; \
 			echo '    };' >> $@; \
 		) \
 		echo '  };' >> $@; \
-	) \
-	echo '}' >> $@
+	)
+	@echo '}' >> $@

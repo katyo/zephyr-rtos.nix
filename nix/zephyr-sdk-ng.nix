@@ -1,14 +1,11 @@
 { stdenv, lib, hostPlatform, fetchurl, autoPatchelfHook, xz, python38, which
 , hidapi, libftdi1, libusb1, overrideOpenocd, cmake, wget, file
-, version ? "0.15.2", toolchains ? "all" }:
+, version ? "0.16.0", toolchains ? "all" }:
 
 let pname = "zephyr-sdk";
     system = lib.splitString "-" hostPlatform.system;
     host = "${lib.elemAt system 1}-${lib.elemAt system 0}";
-    pkg-ext = if (lib.elemAt system 1) == "windows" then ".zip" else ".tar.gz";
     base-url = "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${version}/";
-    minimal-url = "${base-url}${pname}-${version}_${host}_minimal${pkg-ext}";
-    toolchain-url = toolchain: "${base-url}toolchain_${host}_${toolchain}${pkg-ext}";
     hashes = (import ./zephyr-sdk-hash.nix).${version}.${host};
     install-toolchains = if toolchains == "all" then builtins.attrNames hashes.toolchains else toolchains;
 
@@ -17,12 +14,12 @@ in stdenv.mkDerivation {
 
   srcs = [
     (fetchurl {
-      url = minimal-url;
-      hash = hashes.minimal;
+      url = "${base-url}${hashes.minimal.file}";
+      hash = hashes.minimal.hash;
     })
   ] ++ (map (toolchain: fetchurl {
-    url = toolchain-url toolchain;
-    hash = hashes.toolchains.${toolchain};
+    url = "${base-url}${hashes.toolchains.${toolchain}.file}";
+    hash = hashes.toolchains.${toolchain}.hash;
   }) install-toolchains);
 
   sourceRoot = "${pname}-${version}";
