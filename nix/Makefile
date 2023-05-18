@@ -89,29 +89,60 @@ test: fetch-hash
 	@echo $(call hash_get,$(versions),sha256,$(call hosttools_file,linux-aarch64))
 
 # args: ident, pfx, hash, file
-put_hash_helper = $(if $(3),printf '$(1)$(2) = {\n$(1)  file = "$(4)";\n$(1)  hash = "$(3)";\n$(1)};\n' >> $@;)
+define put_hash_out
+
+$(1)$(2) = {
+$(1)  file = \"$(4)\";
+$(1)  hash = \"$(3)\";
+$(1)};
+endef
+
+# args: ident, pfx, hash, file
+put_hash_cond = $(if $(3),$(call put_hash_out,$(1),$(2),$(3),$(4)))
 
 # args: ident, pfx, version, file pfx
-put_hash = $(call put_hash_helper,$(1),$(2),$(call hash_get,$(3),sha256,$(4)),$(call file_get,$(3),sha256,$(4)))
+put_hash = $(call put_hash_cond,$(1),$(2),$(call hash_get,$(3),sha256,$(4)),$(call file_get,$(3),sha256,$(4)))
+
+# args: version, host
+define gen_host_version_info
+
+    \"$(2)\" = {\
+$(call put_hash,      ,hosttools,$(1),$(call hosttools_file,$(2)))\
+$(call put_hash,      ,full,$(1),$(call sdk_full_file,$(1),$(2)))\
+$(call put_hash,      ,minimal,$(1),$(call sdk_min_file,$(1),$(2)))
+      toolchains = {\
+$(foreach toolchain,$(toolchains),$(call put_hash,        ,\"$(toolchain)\",$(1),$(call toolchain_file,$(2),$(toolchain))))
+      };
+    };
+endef
+
+# args: version
+define gen_version_info
+
+  \"$(1)\" = {\
+$(foreach host,$(hosts),$(call gen_host_version_info,$(1),$(host)))
+  };
+endef
+
+define gen_info
+{\
+$(foreach version,$(versions),$(call gen_version_info,$(version)))
+}
+endef
+
+empty :=
+space := $(empty) $(empty)
+
+define newline
+
+
+endef
+
+trim_trailing_spaces_helper = $(subst $(1)$(newline),$(newline),$(2))
+trim_trailing_spaces = $(call trim_trailing_spaces_helper,$(space),$(call trim_trailing_spaces_helper,$(space)$(space),$(call trim_trailing_spaces_helper,$(space)$(space)$(space),$(1))))
+post_process = $(subst $(newline),\n,$(call trim_trailing_spaces,$(1)))
 
 .PHONY: zephyr-sdk-hash.nix
 gen-hash-map: zephyr-sdk-hash.nix
 zephyr-sdk-hash.nix: fetch-hash
-	@echo '{' > $@;
-	@$(foreach version,$(versions), \
-		echo '  "$(version)" = {' >> $@; \
-		$(foreach host,$(hosts), \
-			echo '    "$(host)" = {' >> $@; \
-			$(call put_hash,      ,hosttools,$(version),$(call hosttools_file,$(host))) \
-			$(call put_hash,      ,full,$(version),$(call sdk_full_file,$(version),$(host))) \
-			$(call put_hash,      ,minimal,$(version),$(call sdk_min_file,$(version),$(host))) \
-			echo '      toolchains = {' >> $@; \
-			$(foreach toolchain,$(toolchains), \
-				$(call put_hash,        ,"$(toolchain)",$(version),$(call toolchain_file,$(host),$(toolchain))) \
-			) \
-			echo '      };' >> $@; \
-			echo '    };' >> $@; \
-		) \
-		echo '  };' >> $@; \
-	)
-	@echo '}' >> $@
+	@printf "$(call post_process,$(call gen_info))" > $@
