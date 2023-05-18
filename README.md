@@ -10,4 +10,5 @@ I using this config for a year.
 
 ## Config
 
-You can select required toolchains and add extra dependencies by editing `shell.nix`.
+You can select required toolchains and add extra dependencies
+by creating custom derived `shell.nix` (see `example-shell.nix`).

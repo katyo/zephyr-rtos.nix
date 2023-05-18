@@ -22,7 +22,7 @@ stdenv.mkDerivation rec {
     repo = "openocd";
     #rev = "zephyr-20220611";
     rev = "c5c4794";
-    hash = "sha256-MHr2Lxvm12WyUIXGqkmo3BnnhFwLqu+9Xz92vVX+gFs=";
+    hash = "sha256-xL6tHPrHtQndMnyOl2GciGHbp1BnFhsHpbrIyvDetog=";
     fetchSubmodules = true;
     leaveDotGit = true;
   };

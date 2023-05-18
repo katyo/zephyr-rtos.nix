@@ -9,7 +9,7 @@ python3.pkgs.buildPythonApplication rec {
     repo = "openocd-svd";
     rev = "${git-rev}";
     name = "${pname}-${version}";
-    sha256 = "09q4l70v7rbxg7924fz37njsnfwh6l6by2x8xwc58x100i1ylxj8";
+    hash = "sha256-SHbqQwQgdFQY76gLvww1kDurpT3jOyLSeX3ls8GhBCc=";
   };
 
   format = "other";
