@@ -1,0 +1,67 @@
+From 8c798302649da05158eb9c58393c867ae4da1ad1 Mon Sep 17 00:00:00 2001
+From: Evgeniy Didin <didin@synopsys.com>
+Date: Wed, 29 Jul 2020 08:59:36 +0300
+Subject: [PATCH 05/12] tcl/target/snps*: enable autodetection of RTOS
+
+Signed-off-by: Evgeniy Didin <didin@synopsys.com>
+---
+ tcl/target/snps_em_sk_fpga.cfg | 2 +-
+ tcl/target/snps_hsdk.cfg       | 8 ++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/tcl/target/snps_em_sk_fpga.cfg b/tcl/target/snps_em_sk_fpga.cfg
+index 62f4dec10..35165b977 100644
+--- a/tcl/target/snps_em_sk_fpga.cfg
++++ b/tcl/target/snps_em_sk_fpga.cfg
+@@ -23,7 +23,7 @@ set _coreid 0
+ set _dbgbase [expr {0x00000000 | ($_coreid << 13)}]
+ 
+ target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME \
+-  -coreid 0 -dbgbase $_dbgbase -endian little
++  -coreid 0 -dbgbase $_dbgbase -endian little -rtos auto
+ 
+ # There is no SRST, so do a software reset
+ $_TARGETNAME configure -event reset-assert "arc_em_reset $_TARGETNAME"
+diff --git a/tcl/target/snps_hsdk.cfg b/tcl/target/snps_hsdk.cfg
+index b4f368425..9bfd809a2 100644
+--- a/tcl/target/snps_hsdk.cfg
++++ b/tcl/target/snps_hsdk.cfg
+@@ -25,7 +25,7 @@ set _CHIPNAME arc-em
+ set _TARGETNAME $_CHIPNAME.cpu4
+ jtag newtap $_CHIPNAME cpu4 -irlen 4 -ircapture 0x1 -expected-id 0x200c24b1
+ 
+-target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME
++target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME -rtos auto
+ $_TARGETNAME configure -coreid $_coreid
+ $_TARGETNAME configure -dbgbase $_dbgbase
+ # Flush L2$.
+@@ -42,7 +42,7 @@ $_TARGETNAME arc cache l2 auto 1
+ set _TARGETNAME $_CHIPNAME.cpu3
+ jtag newtap $_CHIPNAME cpu3 -irlen 4 -ircapture 0x1 -expected-id 0x200824b1
+ 
+-target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME
++target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME  -rtos auto
+ $_TARGETNAME configure -coreid $_coreid
+ $_TARGETNAME configure -dbgbase $_dbgbase
+ $_TARGETNAME configure -event reset-assert "arc_common_reset $_TARGETNAME"
+@@ -58,7 +58,7 @@ $_TARGETNAME arc cache l2 auto 1
+ set _TARGETNAME $_CHIPNAME.cpu2
+ jtag newtap $_CHIPNAME cpu2 -irlen 4 -ircapture 0x1 -expected-id 0x200424b1
+ 
+-target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME
++target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME  -rtos auto
+ $_TARGETNAME configure -coreid $_coreid
+ $_TARGETNAME configure -dbgbase $_dbgbase
+ $_TARGETNAME configure -event reset-assert "arc_common_reset $_TARGETNAME"
+@@ -74,7 +74,7 @@ $_TARGETNAME arc cache l2 auto 1
+ set _TARGETNAME $_CHIPNAME.cpu1
+ jtag newtap $_CHIPNAME cpu1 -irlen 4 -ircapture 0x1 -expected-id 0x200024b1
+ 
+-target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME
++target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME  -rtos auto
+ $_TARGETNAME configure -coreid $_coreid
+ $_TARGETNAME configure -dbgbase $_dbgbase
+ $_TARGETNAME configure -event reset-assert "arc_common_reset $_TARGETNAME"
+-- 
+2.40.1
+

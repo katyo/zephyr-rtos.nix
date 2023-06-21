@@ -1,0 +1,374 @@
+From 8e886557898699cc40634479de119fb601105484 Mon Sep 17 00:00:00 2001
+From: Evgeniy Didin <didin@synopsys.com>
+Date: Tue, 28 Jul 2020 15:26:03 +0300
+Subject: [PATCH 04/12] target/arc: introduce SMP support
+
+Signed-off-by: Evgeniy Didin <didin@synopsys.com>
+Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
+---
+ src/target/arc.c             | 143 +++++++++++++++++++++++++++++++++++
+ src/target/arc.h             |   1 +
+ tcl/board/snps_hsdk_smp.cfg  |  36 +++++++++
+ tcl/target/snps_hsdk_smp.cfg |  96 +++++++++++++++++++++++
+ 4 files changed, 276 insertions(+)
+ create mode 100644 tcl/board/snps_hsdk_smp.cfg
+ create mode 100644 tcl/target/snps_hsdk_smp.cfg
+
+diff --git a/src/target/arc.c b/src/target/arc.c
+index 096e0fd84..547edc148 100644
+--- a/src/target/arc.c
++++ b/src/target/arc.c
+@@ -57,6 +57,8 @@ static int arc_unset_breakpoint(struct target *target,
+ static int arc_set_breakpoint(struct target *target,
+ 		struct breakpoint *breakpoint);
+ static int arc_config_step(struct target *target, int enable_step);
++static int arc_halt(struct target *target);
++static int arc_poll(struct target *target);
+ 
+ 
+ void arc_reg_data_type_add(struct target *target,
+@@ -756,6 +758,42 @@ static int arc_examine(struct target *target)
+ 	return ERROR_OK;
+ }
+ 
++int arc_start_core(struct target *target)
++{
++	uint32_t value;
++
++	struct arc_common *arc = target_to_arc(target);
++
++	target->state = TARGET_RUNNING;
++
++	CHECK_RETVAL(arc_jtag_read_aux_reg_one(&arc->jtag_info, AUX_STATUS32_REG, &value));
++	value &= ~SET_CORE_HALT_BIT;        /* clear the HALT bit */
++	CHECK_RETVAL(arc_jtag_write_aux_reg_one(&arc->jtag_info, AUX_STATUS32_REG, value));
++	LOG_DEBUG("Core %s started to run", target_name(target));
++
++	return ERROR_OK;
++}
++
++static int arc_halt_smp(struct target *target)
++{
++	int retval = 0;
++	struct target_list *head;
++	struct target *curr;
++
++	foreach_smp_target(head, target->smp_targets) {
++		curr = head->target;
++		if ((curr != target) && (curr->state != TARGET_HALTED)
++				&& target_was_examined(curr)) {
++
++			/*avoid recursion in arc_dbg_halt */
++			curr->smp = 0;
++			retval += arc_halt(curr);
++			curr->smp = 1;
++		}
++	}
++	return retval;
++}
++
+ static int arc_halt(struct target *target)
+ {
+ 	uint32_t value, irq_state;
+@@ -763,6 +801,11 @@ static int arc_halt(struct target *target)
+ 
+ 	LOG_DEBUG("target->state: %s", target_state_name(target));
+ 
++	if (target->smp) {
++		LOG_DEBUG("halting smp");
++		CHECK_RETVAL(arc_halt_smp(target));
++	}
++
+ 	if (target->state == TARGET_HALTED) {
+ 		LOG_DEBUG("target was already halted");
+ 		return ERROR_OK;
+@@ -1017,9 +1060,37 @@ static int arc_debug_entry(struct target *target)
+ 	return ERROR_OK;
+ }
+ 
++static int arc_ocd_poll_smp(struct target *target)
++{
++
++	struct target_list *head;
++	struct target *curr;
++	int retval = 0;
++
++	foreach_smp_target(head, target->smp_targets) {
++		curr = head->target;
++
++		/* skip calling context */
++		if (curr == target)
++			continue;
++		if (!target_was_examined(curr))
++			continue;
++		/* skip targets that were already halted */
++		if (curr->state == TARGET_HALTED)
++			continue;
++		/* avoid recursion in arc_ocd_poll() */
++		curr->smp = 0;
++		arc_poll(curr);
++		curr->smp = 1;
++	}
++
++	return retval;
++}
++
+ static int arc_poll(struct target *target)
+ {
+ 	uint32_t status, value;
++	int retval;
+ 	struct arc_common *arc = target_to_arc(target);
+ 
+ 	/* gdb calls continuously through this arc_poll() function  */
+@@ -1044,6 +1115,13 @@ static int arc_poll(struct target *target)
+ 			if (target->state == TARGET_RUNNING)
+ 				CHECK_RETVAL(arc_debug_entry(target));
+ 			target->state = TARGET_HALTED;
++
++			if (target->smp) {
++				retval = arc_ocd_poll_smp(target);
++				if (retval != ERROR_OK)
++					return retval;
++			}
++
+ 			CHECK_RETVAL(target_call_event_callbacks(target, TARGET_EVENT_HALTED));
+ 		} else {
+ 		LOG_DEBUG("Discrepancy of STATUS32[0] HALT bit and ARC_JTAG_STAT_RU, "
+@@ -1292,6 +1370,63 @@ static int arc_single_step_core(struct target *target)
+ 	return ERROR_OK;
+ }
+ 
++static int arc_set_pc(struct target *target, int current, target_addr_t address)
++{
++
++	int retval = ERROR_OK;
++	uint32_t resume_pc = 0;
++	struct arc_common *arc = target_to_arc(target);
++	struct reg *pc = &arc->core_and_aux_cache->reg_list[arc->pc_index_in_cache];
++
++
++	/* current = 1: continue on current PC, otherwise continue at <address> */
++	if (!current) {
++		buf_set_u32(pc->value, 0, 32, address);
++		pc->dirty = 1;
++		pc->valid = 1;
++		LOG_DEBUG("Changing the value of current PC to 0x%08" TARGET_PRIxADDR, address);
++	}
++
++	if (!current)
++		resume_pc = address;
++	else
++		resume_pc = buf_get_u32(pc->value, 0, 32);
++
++
++	LOG_DEBUG("Target resumes from PC=0x%" PRIx32 ", pc.dirty=%i, pc.valid=%i",
++								resume_pc, pc->dirty, pc->valid);
++
++	/* check if GDB tells to set our PC where to continue from */
++	if ((pc->valid == 1) && (resume_pc == buf_get_u32(pc->value, 0, 32))) {
++		uint32_t value;
++		value = buf_get_u32(pc->value, 0, 32);
++		LOG_DEBUG("resume Core (when start-core) with PC @:0x%08" PRIx32, value);
++		retval = arc_jtag_write_aux_reg_one(&arc->jtag_info, AUX_PC_REG, value);
++	}
++
++	return retval;
++}
++
++static int arc_restore_smp(struct target *target, int current, target_addr_t address, int debug_execution)
++{
++	int retval = 0;
++	struct target_list *head;
++	struct target *curr;
++	LOG_DEBUG("Restoring smp");
++	foreach_smp_target(head, target->smp_targets) {
++		curr = head->target;
++		if ((curr != target) && (curr->state != TARGET_RUNNING)
++			&& target_was_examined(curr)) {
++
++			retval += arc_restore_context(curr);
++			retval = arc_set_pc(curr, current, address);
++			arc_enable_interrupts(curr, !debug_execution);
++			retval += arc_start_core(curr);
++		}
++	}
++	return retval;
++}
++
+ static int arc_resume(struct target *target, int current, target_addr_t address,
+ 	int handle_breakpoints, int debug_execution)
+ {
+@@ -1322,6 +1457,14 @@ static int arc_resume(struct target *target, int current, target_addr_t address,
+ 		arc_enable_watchpoints(target);
+ 	}
+ 
++	int retval;
++	if (target->smp) {
++		target->gdb_service->core[0] = -1;
++		retval = arc_restore_smp(target, current, address, debug_execution);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
+ 	/* current = 1: continue on current PC, otherwise continue at <address> */
+ 	if (!current) {
+ 		target_buffer_set_u32(target, pc->value, address);
+diff --git a/src/target/arc.h b/src/target/arc.h
+index bb70a598e..c9a4ff5b8 100644
+--- a/src/target/arc.h
++++ b/src/target/arc.h
+@@ -22,6 +22,7 @@
+ #include "target_request.h"
+ #include "target_type.h"
+ #include "helper/bits.h"
++#include "smp.h"
+ 
+ #include "arc_jtag.h"
+ #include "arc_cmd.h"
+diff --git a/tcl/board/snps_hsdk_smp.cfg b/tcl/board/snps_hsdk_smp.cfg
+new file mode 100644
+index 000000000..95a88b5e6
+--- /dev/null
++++ b/tcl/board/snps_hsdk_smp.cfg
+@@ -0,0 +1,36 @@
++#  Copyright (C) 2019 Synopsys, Inc.
++#
++#  This program is free software; you can redistribute it and/or modify
++#  it under the terms of the GNU General Public License as published by
++#  the Free Software Foundation; either version 2 of the License, or
++#  (at your option) any later version.
++#
++#  This program is distributed in the hope that it will be useful,
++#  but WITHOUT ANY WARRANTY; without even the implied warranty of
++#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++#  GNU General Public License for more details.
++#
++#  You should have received a copy of the GNU General Public License
++#  along with this program; if not, write to the
++#  Free Software Foundation, Inc.,
++
++#
++# Synopsys DesignWare ARC AXS103 Software Development Platform (HS38 cores)
++#
++
++# Configure JTAG cable
++# SDP has built-in FT2232 chip, which is similiar to Digilent HS-1, except that
++# it uses channgel B for JTAG, instead of channel A.
++source [find interface/ftdi/snps_sdp.cfg]
++adapter_khz 10000
++
++# ARCs supports only JTAG.
++transport select jtag
++
++# Configure SoC
++source [find target/snps_hsdk_smp.cfg]
++
++# Initialize
++init
++reset halt
++
+diff --git a/tcl/target/snps_hsdk_smp.cfg b/tcl/target/snps_hsdk_smp.cfg
+new file mode 100644
+index 000000000..73139f8fa
+--- /dev/null
++++ b/tcl/target/snps_hsdk_smp.cfg
+@@ -0,0 +1,96 @@
++#  Copyright (C) 2019 Synopsys, Inc.
++#
++#  This program is free software; you can redistribute it and/or modify
++#  it under the terms of the GNU General Public License as published by
++#  the Free Software Foundation; either version 2 of the License, or
++#  (at your option) any later version.
++#
++#  This program is distributed in the hope that it will be useful,
++#  but WITHOUT ANY WARRANTY; without even the implied warranty of
++#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++#  GNU General Public License for more details.
++#
++#  You should have received a copy of the GNU General Public License
++#  along with this program; if not, write to the
++#  Free Software Foundation, Inc.,
++
++#
++# HS Development Kit SoC.
++#
++# Contains quad-core ARC HS38.
++#
++
++source [find cpu/arc/hs.tcl]
++
++set _coreid 0
++set _dbgbase [expr 0x00000000 | ($_coreid << 13)]
++
++# CHIPNAME will be used to choose core family (600, 700 or EM). As far as
++# OpenOCD is concerned EM and HS are identical.
++set _CHIPNAME arc-em
++
++# OpenOCD discovers JTAG TAPs in reverse order.
++
++# ARC HS38 core 4
++set _TARGETNAME $_CHIPNAME.cpu4
++jtag newtap $_CHIPNAME cpu4 -irlen 4 -ircapture 0x1 -expected-id 0x200c24b1
++
++target create $_TARGETNAME arcv2 -chain-position $_TARGETNAME
++$_TARGETNAME configure -coreid $_coreid
++$_TARGETNAME configure -dbgbase $_dbgbase
++# Flush L2$.
++$_TARGETNAME configure -event reset-assert "arc_hs_reset $_TARGETNAME"
++set _coreid [expr $_coreid + 1]
++set _dbgbase [expr 0x00000000 | ($_coreid << 13)]
++arc_hs_init_regs
++
++# Enable L2 cache support for core 4.
++$_TARGETNAME arc cache l2 auto 1
++
++# ARC HS38 core 3
++set _TARGETNAME1 $_CHIPNAME.cpu3
++jtag newtap $_CHIPNAME cpu3 -irlen 4 -ircapture 0x1 -expected-id 0x200824b1
++
++target create $_TARGETNAME1 arcv2 -chain-position $_TARGETNAME1
++$_TARGETNAME1 configure -coreid $_coreid
++$_TARGETNAME1 configure -dbgbase $_dbgbase
++$_TARGETNAME1 configure -event reset-assert "arc_common_reset $_TARGETNAME1"
++set _coreid [expr $_coreid + 1]
++set _dbgbase [expr 0x00000000 | ($_coreid << 13)]
++arc_hs_init_regs
++
++# Enable L2 cache support for core 3.
++$_TARGETNAME arc cache l2 auto 1
++
++# ARC HS38 core 2
++set _TARGETNAME2 $_CHIPNAME.cpu2
++jtag newtap $_CHIPNAME cpu2 -irlen 4 -ircapture 0x1 -expected-id 0x200424b1
++
++target create $_TARGETNAME2 arcv2 -chain-position $_TARGETNAME2
++$_TARGETNAME2 configure -coreid $_coreid
++$_TARGETNAME2 configure -dbgbase $_dbgbase
++$_TARGETNAME2 configure -event reset-assert "arc_common_reset $_TARGETNAME2"
++set _coreid [expr $_coreid + 1]
++set _dbgbase [expr 0x00000000 | ($_coreid << 13)]
++arc_hs_init_regs
++
++# Enable L2 cache support for core 2.
++$_TARGETNAME arc cache l2 auto 1
++
++# ARC HS38 core 1
++set _TARGETNAME3 $_CHIPNAME.cpu1
++jtag newtap $_CHIPNAME cpu1 -irlen 4 -ircapture 0x1 -expected-id 0x200024b1
++
++target create $_TARGETNAME3 arcv2 -chain-position $_TARGETNAME3
++$_TARGETNAME3 configure -coreid $_coreid
++$_TARGETNAME3 configure -dbgbase $_dbgbase
++$_TARGETNAME3 configure -event reset-assert "arc_common_reset $_TARGETNAME3"
++set _coreid [expr $_coreid + 1]
++set _dbgbase [expr 0x00000000 | ($_coreid << 13)]
++arc_hs_init_regs
++
++# Enable L2 cache support for core 1.
++$_TARGETNAME arc cache l2 auto 1
++
++#target smp $_CHIPNAME.cpu4 $_CHIPNAME.cpu3 $_CHIPNAME.cpu2 $_CHIPNAME.cpu1
++target smp $_TARGETNAME3 $_TARGETNAME2 $_TARGETNAME1 $_TARGETNAME
+-- 
+2.40.1
+

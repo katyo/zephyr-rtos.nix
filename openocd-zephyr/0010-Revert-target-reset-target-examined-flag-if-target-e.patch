@@ -1,0 +1,104 @@
+From 45979b5e238324d5037a89ca0af041dce6fd214e Mon Sep 17 00:00:00 2001
+From: Stephanos Ioannidis <root@stephanos.io>
+Date: Thu, 29 Sep 2022 13:17:20 +0900
+Subject: [PATCH 10/12] Revert "target: reset target examined flag if
+ target::examine() fails"
+
+This reverts commit 98d9f1168cbdc59e4c2c0b1f01b225a4df9ad98a because
+it causes flashing issues with some Zephyr targets (notably, STM32
+family devices).
+
+The patch in itself does not seem to be doing anything wrong in
+particular; but, it uncovers various problems with the Zephyr-side
+OpenOCD configurations -- mainly, not resetting the target device on
+debugger connect, which may lead to connection failures because Zephyr
+puts the target CPU to sleep while idling and the CPU cannot respond to
+the debugger's request in this state.
+
+For more details, refer to the GitHub issue
+zephyrproject-rtos/zephyr#50590.
+
+Revert this commit once the Zephyr-side OpenOCD configurations are
+fixed.
+
+Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
+---
+ src/target/target.c | 29 +++++++++++------------------
+ 1 file changed, 11 insertions(+), 18 deletions(-)
+
+diff --git a/src/target/target.c b/src/target/target.c
+index a1337bc97..50fc5d7a7 100644
+--- a/src/target/target.c
++++ b/src/target/target.c
+@@ -726,15 +726,6 @@ static int no_mmu(struct target *target, int *enabled)
+ 	return ERROR_OK;
+ }
+ 
+-/**
+- * Reset the @c examined flag for the given target.
+- * Pure paranoia -- targets are zeroed on allocation.
+- */
+-static inline void target_reset_examined(struct target *target)
+-{
+-	target->examined = false;
+-}
+-
+ static int default_examine(struct target *target)
+ {
+ 	target_set_examined(target);
+@@ -755,12 +746,10 @@ int target_examine_one(struct target *target)
+ 
+ 	int retval = target->type->examine(target);
+ 	if (retval != ERROR_OK) {
+-		target_reset_examined(target);
+ 		target_call_event_callbacks(target, TARGET_EVENT_EXAMINE_FAIL);
+ 		return retval;
+ 	}
+ 
+-	target_set_examined(target);
+ 	target_call_event_callbacks(target, TARGET_EVENT_EXAMINE_END);
+ 
+ 	return ERROR_OK;
+@@ -1542,6 +1531,15 @@ static int target_profiling(struct target *target, uint32_t *samples,
+ 			num_samples, seconds);
+ }
+ 
++/**
++ * Reset the @c examined flag for the given target.
++ * Pure paranoia -- targets are zeroed on allocation.
++ */
++static void target_reset_examined(struct target *target)
++{
++	target->examined = false;
++}
++
+ static int handle_target(void *priv);
+ 
+ static int target_init_one(struct command_context *cmd_ctx,
+@@ -3072,7 +3070,7 @@ static int handle_target(void *priv)
+ 				/* Target examination could have failed due to unstable connection,
+ 				 * but we set the examined flag anyway to repoll it later */
+ 				if (retval != ERROR_OK) {
+-					target_set_examined(target);
++					target->examined = true;
+ 					LOG_USER("Examination failed, GDB will be halted. Polling again in %dms",
+ 						 target->backoff.times * polling_interval);
+ 					return retval;
+@@ -5746,13 +5744,8 @@ static int jim_target_examine(Jim_Interp *interp, int argc, Jim_Obj *const *argv
+ 	}
+ 
+ 	int e = target->type->examine(target);
+-	if (e != ERROR_OK) {
+-		target_reset_examined(target);
++	if (e != ERROR_OK)
+ 		return JIM_ERR;
+-	}
+-
+-	target_set_examined(target);
+-
+ 	return JIM_OK;
+ }
+ 
+-- 
+2.40.1
+

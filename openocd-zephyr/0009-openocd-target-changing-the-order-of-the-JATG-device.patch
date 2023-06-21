@@ -1,0 +1,54 @@
+From d5bef5cf46f48ca46b99c3aa34fbed7ccdf9e429 Mon Sep 17 00:00:00 2001
+From: Esteban Valverde <esteban.valverde.vega@intel.com>
+Date: Wed, 27 Apr 2022 16:43:46 +0100
+Subject: [PATCH 09/12] openocd: target: changing the order of the JATG devices
+
+For Cyclone V SoC Development kit, the order of the JTAG devices is
+inverted when using USB blaster to program the SoC, this is a fix,
+so the user dont have to do it manually
+
+Signed-off-by: Esteban Valverde <esteban.valverde.vega@intel.com>
+---
+ tcl/target/altera_fpgasoc.cfg | 18 ++++++++----------
+ 1 file changed, 8 insertions(+), 10 deletions(-)
+
+diff --git a/tcl/target/altera_fpgasoc.cfg b/tcl/target/altera_fpgasoc.cfg
+index a98b346c6..a6f056ee6 100644
+--- a/tcl/target/altera_fpgasoc.cfg
++++ b/tcl/target/altera_fpgasoc.cfg
+@@ -9,16 +9,6 @@ if { [info exists CHIPNAME] } {
+    set _CHIPNAME fpgasoc
+ }
+ 
+-# CoreSight Debug Access Port
+-if { [info exists DAP_TAPID] } {
+-        set _DAP_TAPID $DAP_TAPID
+-} else {
+-        set _DAP_TAPID 0x4ba00477
+-}
+-
+-jtag newtap $_CHIPNAME cpu -irlen 4 -ircapture 0x01 -irmask 0x0f \
+-        -expected-id $_DAP_TAPID
+-
+ # Subsidiary TAP: fpga
+ if { [info exists FPGA_TAPID] } {
+    set _FPGA_TAPID $FPGA_TAPID
+@@ -27,7 +17,15 @@ if { [info exists FPGA_TAPID] } {
+ }
+ jtag newtap $_CHIPNAME.fpga tap -irlen 10 -ircapture 0x01 -irmask 0x3 -expected-id $_FPGA_TAPID
+ 
++# CoreSight Debug Access Port
++if { [info exists DAP_TAPID] } {
++        set _DAP_TAPID $DAP_TAPID
++} else {
++        set _DAP_TAPID 0x4ba00477
++}
+ 
++jtag newtap $_CHIPNAME cpu -irlen 4 -ircapture 0x01 -irmask 0x0f \
++        -expected-id $_DAP_TAPID
+ #
+ # Cortex-A9 target
+ #
+-- 
+2.40.1
+

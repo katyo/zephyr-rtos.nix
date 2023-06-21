@@ -1,0 +1,122 @@
+From c8a128aa8423c286ed7f3d7b20703070e56a8f32 Mon Sep 17 00:00:00 2001
+From: Edward Fewell <efewell@ti.com>
+Date: Thu, 14 May 2020 08:23:03 -0500
+Subject: [PATCH 02/12] [RFC] target/cortex_m: Block extra srst asserts in
+ target code
+
+This is intended to be a temporary work around for an issue where
+TCL scripts are toggling srst, and then the Cortex M target code
+is again asserting srst. On the TI LPRF (CC26xx/CC13xx) devices
+this results in an undebuggable state because the target code
+does not restore the JTAG connection. LPRF targets come out of
+reset in 2-pin mode and also require the ICEPick JTAG router to
+put the Cortex M core into the scan chain. Neither are happening
+after the Cortex M target code asserts srst.
+
+Added a flag to the JTAG reset config to signal to the Cortex M
+routine to -not- assert srst again. srst was already handled prior,
+and the target has been reset and ready to debug.
+
+Ideally, what really needs to happen for the LPRF targets is the
+following.
+
+For reset halt or reset init:
+assert srst
+run TCK for 50 ms
+deassert srst
+run TCK for 50 ms
+switch to 4-pin mode
+command ICEPick to put Cortex M TAP into scan chain
+continue reconnecting debug
+halt the core
+
+For reset run:
+assert srst
+delay
+deassert srst
+delay
+switch to 4-pin mode
+command ICEPick to put Cortex M TAP into scan chain
+continue reconnecting debug
+leave core running
+
+The running TCK periods during the srst assert/deassert on
+these device is to trigger the LPRF's HIB (halt in boot)
+mode where the target will stop execution at a hook in the
+boot ROM so that debug can start at the very start of the
+user application. The XDS110 code today already just does
+this every time, but ideally this should be configurable
+so that other probes can trigger HIB.
+
+And note that debug on LPRF is not very stable without
+using srst reset. It is common for user applications to
+get the device in a mode that cannot be debugged unless
+srst and HIB are used.
+
+Change-Id: I424e6f66cfeee58ba17991004f6c8fd184af8099
+Signed-off-by: Edward Fewell <efewell@ti.com>
+---
+ src/jtag/adapter.c       | 2 ++
+ src/jtag/jtag.h          | 3 ++-
+ src/target/cortex_m.c    | 4 ++--
+ tcl/target/ti_cc26x0.cfg | 3 ++-
+ 4 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/src/jtag/adapter.c b/src/jtag/adapter.c
+index b7feac575..29df41e63 100644
+--- a/src/jtag/adapter.c
++++ b/src/jtag/adapter.c
+@@ -506,6 +506,8 @@ COMMAND_HANDLER(handle_reset_config_command)
+ 			tmp = RESET_HAS_SRST;
+ 		else if (strcmp(*CMD_ARGV, "trst_and_srst") == 0)
+ 			tmp = RESET_HAS_TRST | RESET_HAS_SRST;
++		else if (strcmp(*CMD_ARGV, "srst_once") == 0)
++			tmp = RESET_HAS_SRST | RESET_SRST_ONCE;
+ 		else
+ 			m = 0;
+ 		if (mask & m) {
+diff --git a/src/jtag/jtag.h b/src/jtag/jtag.h
+index 4f94e9913..67405502e 100644
+--- a/src/jtag/jtag.h
++++ b/src/jtag/jtag.h
+@@ -219,7 +219,8 @@ enum reset_types {
+ 	RESET_TRST_OPEN_DRAIN = 0x10,
+ 	RESET_SRST_PUSH_PULL  = 0x20,
+ 	RESET_SRST_NO_GATING  = 0x40,
+-	RESET_CNCT_UNDER_SRST = 0x80
++	RESET_CNCT_UNDER_SRST = 0x80,
++	RESET_SRST_ONCE       = 0x100
+ };
+ 
+ enum reset_types jtag_get_reset_config(void);
+diff --git a/src/target/cortex_m.c b/src/target/cortex_m.c
+index 017a6d3a1..f3a1ef68a 100644
+--- a/src/target/cortex_m.c
++++ b/src/target/cortex_m.c
+@@ -1494,10 +1494,10 @@ static int cortex_m_assert_reset(struct target *target)
+ 
+ 	if (jtag_reset_config & RESET_HAS_SRST) {
+ 		/* default to asserting srst */
+-		if (!srst_asserted)
++		if (!srst_asserted && !(jtag_reset_config & RESET_SRST_ONCE))
+ 			adapter_assert_reset();
+ 
+-		/* srst is asserted, ignore AP access errors */
++		/* if srst is asserted, ignore AP access errors */
+ 		retval = ERROR_OK;
+ 	} else {
+ 		/* Use a standard Cortex-M3 software reset mechanism.
+diff --git a/tcl/target/ti_cc26x0.cfg b/tcl/target/ti_cc26x0.cfg
+index b9ccf3123..51050b475 100644
+--- a/tcl/target/ti_cc26x0.cfg
++++ b/tcl/target/ti_cc26x0.cfg
+@@ -54,4 +54,5 @@ $_TARGETNAME configure -work-area-phys 0x20000000 -work-area-size $_WORKAREASIZE
+ set _FLASHNAME $_CHIPNAME.flash
+ flash bank $_FLASHNAME cc26xx 0 0 0 0 $_TARGETNAME
+ 
+-cortex_m reset_config vectreset
++reset_config srst_once
++adapter srst delay 100
+-- 
+2.40.1
+

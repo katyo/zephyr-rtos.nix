@@ -1,0 +1,55 @@
+From a9f09e7d1830e74af82fd2d7d42923810d5f6281 Mon Sep 17 00:00:00 2001
+From: Nikolay Agishev <agishev@synopsys.com>
+Date: Tue, 18 Apr 2023 15:54:27 +0400
+Subject: [PATCH 11/12] rtos/zephyr: Remove Zephyr RTOS suport for ARC_SEC
+ cores
+
+In issues https://github.com/zephyrproject-rtos/sdk-ng/issues/631
+and https://github.com/zephyrproject-rtos/zephyr/issues/55686
+root case is in an attempt to access arc registers at early stage of
+OpenOCD initialization process. At this stage transport is not
+configured and this cause fault with error
+"Assertion `jtag_trst == 0' failed".
+
+As temporary solution this patch remove early access to ARC cores.
+This also disables Zephyr RTOS suport for ARC_SEC cores.
+
+Signed-off-by: Nikolay Agishev <agishev@synopsys.com>
+---
+ src/rtos/zephyr.c | 20 --------------------
+ 1 file changed, 20 deletions(-)
+
+diff --git a/src/rtos/zephyr.c b/src/rtos/zephyr.c
+index b00b4b341..f5a0686b5 100644
+--- a/src/rtos/zephyr.c
++++ b/src/rtos/zephyr.c
+@@ -422,26 +422,6 @@ static int zephyr_create(struct target *target)
+ 
+ 	LOG_INFO("Zephyr: looking for target: %s", name);
+ 
+-	/* ARC specific, check if EM target has security subsystem
+-	 * In case of ARC_HAS_SECURE zephyr option enabled
+-	 * the thread stack contains blink,sec_stat,status32 register
+-	 * values. If ARC_HAS_SECURE is disabled, only blink and status32
+-	 * register values are saved on stack. */
+-	if (!strcmp(name, "arcv2")) {
+-		uint32_t value;
+-		struct arc_common *arc = target_to_arc(target);
+-		/* Reading SEC_BUILD bcr */
+-		CHECK_RETVAL(arc_jtag_read_aux_reg_one(&arc->jtag_info, ARC_AUX_SEC_BUILD_REG, &value));
+-		if (value != 0) {
+-			LOG_DEBUG("ARC EM board has security subsystem, changing offsets");
+-			arc_cpu_saved[ARC_REG_NUM - 1].offset = 8;
+-			/* After reading callee registers in stack
+-			 * now blink,sec_stat,status32 registers
+-			 * are located. */
+-			arc_cpu_saved_stacking.stack_registers_size = 12;
+-		}
+-	}
+-
+ 	for (struct zephyr_params *p = zephyr_params_list; p->target_name; p++) {
+ 		if (!strcmp(p->target_name, name)) {
+ 			LOG_INFO("Zephyr: target known, params at %p", p);
+-- 
+2.40.1
+

@@ -1,6 +1,10 @@
 { pkgs ? import <nixpkgs> {}, ... }:
+with (import ./utils.nix { inherit (pkgs) lib; });
 pkgs.extend (self: super: with self; rec {
-  zephyr-openocd = callPackage ./zephyr-openocd.nix {};
+  zephyr-openocd = (callPackage ./openocd.nix {}).overrideDerivation (old: {
+    nativeBuildInputs = old.nativeBuildInputs ++ [ autoreconfHook ];
+    patches = filesFromDir isPatchFile ./openocd-zephyr;
+  });
 
   zephyr-sdk = callPackage ./zephyr-sdk-ng.nix {
     overrideOpenocd = zephyr-openocd;

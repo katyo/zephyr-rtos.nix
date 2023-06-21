@@ -1,0 +1,3976 @@
+From 8de4e8cc9ce681b6fbc68bcf04939e705f27af7f Mon Sep 17 00:00:00 2001
+From: Kumar Gala <kumar.gala@linaro.org>
+Date: Tue, 30 Oct 2018 06:33:36 +0800
+Subject: [PATCH 06/12] [RV32M1] Add RV32M1 spport
+
+This is based on https://github.com/open-isa-rv32m1/rv32m1-openocd
+commit SHA 753dde2a62d9ea1f73c29bf95c771c653966b8ea with various
+cleanups:
+
+* Fixes to build with current openocd sources
+* re-formatting files
+* removed encoding.h
+
+Signed-off-by: Kumar Gala <kumar.gala@linaro.org>
+Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
+---
+ src/flash/nor/Makefile.am            |    1 +
+ src/flash/nor/drivers.c              |    2 +
+ src/flash/nor/rv32m1.c               |  712 +++++++++++++
+ src/target/Makefile.am               |    6 +
+ src/target/rv32m1/rv32m1.c           | 1462 ++++++++++++++++++++++++++
+ src/target/rv32m1/rv32m1.h           |  162 +++
+ src/target/rv32m1/rv32m1_du.h        |   73 ++
+ src/target/rv32m1/rv32m1_du_adv.c    | 1027 ++++++++++++++++++
+ src/target/rv32m1/rv32m1_tap.h       |   40 +
+ src/target/rv32m1/rv32m1_tap_mohor.c |   63 ++
+ src/target/target.c                  |    2 +
+ tcl/target/rv32m1_ri5cy.cfg          |  150 +++
+ tcl/target/rv32m1_zero_riscy.cfg     |  114 ++
+ 13 files changed, 3814 insertions(+)
+ create mode 100644 src/flash/nor/rv32m1.c
+ create mode 100644 src/target/rv32m1/rv32m1.c
+ create mode 100644 src/target/rv32m1/rv32m1.h
+ create mode 100644 src/target/rv32m1/rv32m1_du.h
+ create mode 100644 src/target/rv32m1/rv32m1_du_adv.c
+ create mode 100644 src/target/rv32m1/rv32m1_tap.h
+ create mode 100644 src/target/rv32m1/rv32m1_tap_mohor.c
+ create mode 100644 tcl/target/rv32m1_ri5cy.cfg
+ create mode 100644 tcl/target/rv32m1_zero_riscy.cfg
+
+diff --git a/src/flash/nor/Makefile.am b/src/flash/nor/Makefile.am
+index f04f0d206..312d5d86d 100644
+--- a/src/flash/nor/Makefile.am
++++ b/src/flash/nor/Makefile.am
+@@ -36,6 +36,7 @@ NOR_DRIVERS = \
+ 	%D%/jtagspi.c \
+ 	%D%/kinetis.c \
+ 	%D%/kinetis_ke.c \
++	%D%/rv32m1.c \
+ 	%D%/lpc2000.c \
+ 	%D%/lpc288x.c \
+ 	%D%/lpc2900.c \
+diff --git a/src/flash/nor/drivers.c b/src/flash/nor/drivers.c
+index b9353d820..d0153a45d 100644
+--- a/src/flash/nor/drivers.c
++++ b/src/flash/nor/drivers.c
+@@ -36,6 +36,7 @@ extern const struct flash_driver fespi_flash;
+ extern const struct flash_driver jtagspi_flash;
+ extern const struct flash_driver kinetis_flash;
+ extern const struct flash_driver kinetis_ke_flash;
++extern const struct flash_driver rv32m1_flash;
+ extern const struct flash_driver lpc2000_flash;
+ extern const struct flash_driver lpc288x_flash;
+ extern const struct flash_driver lpc2900_flash;
+@@ -112,6 +113,7 @@ static const struct flash_driver * const flash_drivers[] = {
+ 	&jtagspi_flash,
+ 	&kinetis_flash,
+ 	&kinetis_ke_flash,
++	&rv32m1_flash,
+ 	&lpc2000_flash,
+ 	&lpc288x_flash,
+ 	&lpc2900_flash,
+diff --git a/src/flash/nor/rv32m1.c b/src/flash/nor/rv32m1.c
+new file mode 100644
+index 000000000..6f4c18530
+--- /dev/null
++++ b/src/flash/nor/rv32m1.c
+@@ -0,0 +1,712 @@
++/***************************************************************************
++ *   Copyright (C) 2011 by Mathias Kuester                                 *
++ *   kesmtp@freenet.de                                                     *
++ *                                                                         *
++ *   Copyright (C) 2011 sleep(5) ltd                                       *
++ *   tomas@sleepfive.com                                                   *
++ *                                                                         *
++ *   Copyright (C) 2012 by Christopher D. Kilgour                          *
++ *   techie at whiterocker.com                                             *
++ *                                                                         *
++ *   Copyright (C) 2013 Nemui Trinomius                                    *
++ *   nemuisan_kawausogasuki@live.jp                                        *
++ *                                                                         *
++ *   Copyright (C) 2015 Tomas Vanek                                        *
++ *   vanekt@fbl.cz                                                         *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "jtag/interface.h"
++#include "imp.h"
++#include <helper/binarybuffer.h>
++#include <helper/time_support.h>
++#include <target/target_type.h>
++#include <target/algorithm.h>
++#include <target/armv7m.h>
++#include <target/cortex_m.h>
++
++#define FLEXRAM		0x48000000
++
++#define FTFx_FSTAT	0x40023000
++#define FTFx_FCNFG	0x40023001
++#define FTFx_FCCOB3	0x40023004
++#define FTFx_FPROT3	0x40023010
++#define FTFx_FDPROT	0x40023017
++#define SIM_SDID	0x40048024
++#define SIM_SOPT1	0x40047000
++#define SIM_FCFG1	0x4004804c
++#define SIM_FCFG2	0x40048050
++#define WDOG_STCTRH	0x40052000
++/* Some register address are different for core 0 and core 1. */
++static uint32_t SMC_PMCTRL;
++static uint32_t SMC_PMSTAT;
++
++/* Values */
++#define PM_STAT_RUN		0x01
++#define PM_STAT_VLPR		0x04
++#define PM_CTRL_RUNM_RUN	0x00
++
++/* Commands */
++#define FTFx_CMD_BLOCKSTAT  0x00
++#define FTFx_CMD_SECTSTAT   0x01
++#define FTFx_CMD_LWORDPROG  0x06
++#define FTFx_CMD_SECTERASE  0x09
++#define FTFx_CMD_SECTWRITE  0x0b
++#define FTFx_CMD_MASSERASE  0x44
++#define FTFx_CMD_PGMPART    0x80
++#define FTFx_CMD_SETFLEXRAM 0x81
++
++#define RV32M1_SDID    0x04501008
++
++struct rv32m1_flash_bank {
++	bool probed;
++	uint32_t sector_size;
++	uint32_t max_flash_prog_size;
++	uint32_t protection_size;
++	uint32_t prog_base;		/* base address for FTFx operations */
++	/* same as bank->base for pflash, differs for FlexNVM */
++	uint32_t protection_block;	/* number of first protection block in this bank */
++
++	uint32_t sim_sdid;
++	uint32_t mcm_cpcr2;
++	uint8_t flash_index;
++
++	enum {
++		FC_AUTO = 0,
++		FC_PFLASH,
++		FC_FLEX_NVM,
++		FC_FLEX_RAM,
++	} flash_class;
++
++	enum {
++		FS_PROGRAM_SECTOR = 1,
++		FS_PROGRAM_LONGWORD = 2,
++		FS_PROGRAM_PHRASE = 4, /* Unsupported */
++		FS_INVALIDATE_CACHE = 8,
++	} flash_support;
++};
++
++struct flash_driver rv32m1_flash;
++static int rv32m1_write_inner(struct flash_bank *bank, const uint8_t *buffer,
++		uint32_t offset, uint32_t count);
++static int rv32m1_auto_probe(struct flash_bank *bank);
++
++FLASH_BANK_COMMAND_HANDLER(rv32m1_flash_bank_command)
++{
++	struct rv32m1_flash_bank *bank_info;
++
++	if (CMD_ARGC < 6)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	LOG_INFO("add flash_bank rv32m1 %s", bank->name);
++
++	/*
++	 * RV32M1 has core0 flash (1M, base 0) and core1 flash(256K, base 0x01000000)
++	 */
++	if ((0 != bank->base) && (0x01000000 != bank->base))
++	{
++		LOG_WARNING("Invalid flash base " TARGET_ADDR_FMT ", use 0 instead", bank->base);
++	}
++
++	bank_info = malloc(sizeof(struct rv32m1_flash_bank));
++
++	memset(bank_info, 0, sizeof(struct rv32m1_flash_bank));
++
++	/* Core 0 flash. */
++	if (0 == bank->base)
++	{
++		SMC_PMCTRL = 0x40020010;
++		SMC_PMSTAT = 0x40020018;
++		bank_info->mcm_cpcr2 = 0xE0080034;
++		bank_info->flash_index = 0;
++	}
++	else /* Core 1 flash. */
++	{
++		SMC_PMCTRL = 0x41020010;
++		SMC_PMSTAT = 0x41020018;
++		bank_info->mcm_cpcr2 = 0xF0080034;
++		bank_info->flash_index = 1;
++	}
++
++	bank->driver_priv = bank_info;
++
++	return ERROR_OK;
++}
++
++
++COMMAND_HANDLER(rv32m1_disable_wdog_handler)
++{
++	LOG_ERROR("Disable watchdog not supported");
++	return ERROR_FAIL;
++}
++
++static int rv32m1_ftfx_decode_error(uint8_t fstat)
++{
++	if (fstat & 0x20) {
++		LOG_ERROR("Flash operation failed, illegal command");
++		return ERROR_FLASH_OPER_UNSUPPORTED;
++
++	} else if (fstat & 0x10)
++		LOG_ERROR("Flash operation failed, protection violated");
++
++	else if (fstat & 0x40)
++		LOG_ERROR("Flash operation failed, read collision");
++
++	else if (fstat & 0x80)
++		return ERROR_OK;
++
++	else
++		LOG_ERROR("Flash operation timed out");
++
++	return ERROR_FLASH_OPERATION_FAILED;
++}
++
++
++static int rv32m1_ftfx_prepare(struct target *target)
++{
++	int result, i;
++	uint8_t fstat;
++
++	/* wait until busy */
++	for (i = 0; i < 50; i++) {
++		result = target_read_u8(target, FTFx_FSTAT, &fstat);
++		if (result != ERROR_OK)
++			return result;
++
++		if (fstat & 0x80)
++			break;
++	}
++
++	if ((fstat & 0x80) == 0) {
++		LOG_ERROR("Flash controller is busy");
++		return ERROR_FLASH_OPERATION_FAILED;
++	}
++	if (fstat != 0x80) {
++		/* reset error flags */
++		result = target_write_u8(target, FTFx_FSTAT, 0x70);
++	}
++	return result;
++}
++
++static int rv32m1_protect(struct flash_bank *bank, int set, unsigned int first,
++		unsigned int last)
++{
++	unsigned int i;
++
++	if (!bank->prot_blocks || bank->num_prot_blocks == 0) {
++		LOG_ERROR("No protection possible for current bank!");
++		return ERROR_FLASH_BANK_INVALID;
++	}
++
++	for (i = first; i < bank->num_prot_blocks && i <= last; i++)
++		bank->prot_blocks[i].is_protected = set;
++
++	LOG_INFO("Protection bits will be written at the next FCF sector erase or write.");
++	LOG_INFO("Do not issue 'flash info' command until protection is written,");
++	LOG_INFO("doing so would re-read protection status from MCU.");
++
++	return ERROR_OK;
++}
++
++static int rv32m1_protect_check(struct flash_bank *bank)
++{
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++	int result, b;
++	unsigned int i;
++	uint32_t fprot;
++
++	if (kinfo->flash_class == FC_PFLASH) {
++
++		/* TODO */
++		/* read protection register */
++		result = target_read_u32(bank->target, FTFx_FPROT3, &fprot);
++		if (result != ERROR_OK)
++			return result;
++
++		/* Every bit protects 1/32 of the full flash (not necessarily just this bank) */
++
++	} else if (kinfo->flash_class == FC_FLEX_NVM) {
++		uint8_t fdprot;
++
++		/* read protection register */
++		result = target_read_u8(bank->target, FTFx_FDPROT, &fdprot);
++		if (result != ERROR_OK)
++			return result;
++
++		fprot = fdprot;
++
++	} else {
++		LOG_ERROR("Protection checks for FlexRAM not supported");
++		return ERROR_FLASH_BANK_INVALID;
++	}
++
++	b = kinfo->protection_block;
++	for (i = 0; i < bank->num_prot_blocks; i++) {
++		if ((fprot >> b) & 1)
++			bank->prot_blocks[i].is_protected = 0;
++		else
++			bank->prot_blocks[i].is_protected = 1;
++
++		b++;
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_ftfx_command(struct target *target, uint8_t fcmd, uint32_t faddr,
++		uint8_t fccob4, uint8_t fccob5, uint8_t fccob6, uint8_t fccob7,
++		uint8_t fccob8, uint8_t fccob9, uint8_t fccoba, uint8_t fccobb,
++		uint8_t *ftfx_fstat)
++{
++
++	/*
++	 * When required by the command, address bit 23 selects between main flash memory
++	 * (=0) and secondary flash memory (=1).
++	 */
++	if (faddr > 0x00FFFFFF)
++	{
++		faddr |= 0x00800000;
++	}
++
++	uint8_t command[12] = {faddr & 0xff, (faddr >> 8) & 0xff, (faddr >> 16) & 0xff, fcmd,
++		fccob7, fccob6, fccob5, fccob4,
++		fccobb, fccoba, fccob9, fccob8};
++	int result;
++	uint8_t fstat;
++	int64_t ms_timeout = timeval_ms() + 250;
++
++	result = target_write_memory(target, FTFx_FCCOB3, 4, 3, command);
++	if (result != ERROR_OK)
++		return result;
++
++	/* start command */
++	result = target_write_u8(target, FTFx_FSTAT, 0x80);
++	if (result != ERROR_OK)
++		return result;
++
++	/* wait for done */
++	do {
++		result = target_read_u8(target, FTFx_FSTAT, &fstat);
++
++		if (result != ERROR_OK)
++			return result;
++
++		if (fstat & 0x80)
++			break;
++
++	} while (timeval_ms() < ms_timeout);
++
++	if (ftfx_fstat)
++		*ftfx_fstat = fstat;
++
++	if ((fstat & 0xf0) != 0x80) {
++		LOG_DEBUG("ftfx command failed FSTAT: %02X FCCOB: %02X%02X%02X%02X %02X%02X%02X%02X %02X%02X%02X%02X",
++				fstat, command[3], command[2], command[1], command[0],
++				command[7], command[6], command[5], command[4],
++				command[11], command[10], command[9], command[8]);
++
++		return rv32m1_ftfx_decode_error(fstat);
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_check_run_mode(struct target *target)
++{
++	/* TODO: Add run mode check. */
++	return ERROR_OK;
++}
++
++static void rv32m1_invalidate_flash_cache(struct flash_bank *bank)
++{
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++	uint32_t mcm_cpcr2 = 0x31;
++
++	if (!(kinfo->flash_support & FS_INVALIDATE_CACHE))
++		return;
++
++	target_write_memory(bank->target, kinfo->mcm_cpcr2, 4, 1, (uint8_t*)&mcm_cpcr2);
++
++	return;
++}
++
++static int rv32m1_erase(struct flash_bank *bank, unsigned int first,
++		unsigned int last)
++{
++	int result;
++	unsigned int i;
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++
++	result = rv32m1_check_run_mode(bank->target);
++	if (result != ERROR_OK)
++		return result;
++
++	/* reset error flags */
++	result = rv32m1_ftfx_prepare(bank->target);
++	if (result != ERROR_OK)
++		return result;
++
++	if ((first > bank->num_sectors) || (last > bank->num_sectors))
++		return ERROR_FLASH_OPERATION_FAILED;
++
++	/*
++	 * FIXME: TODO: use the 'Erase Flash Block' command if the
++	 * requested erase is PFlash or NVM and encompasses the entire
++	 * block.  Should be quicker.
++	 */
++	for (i = first; i <= last; i++) {
++		/* set command and sector address */
++		result = rv32m1_ftfx_command(bank->target, FTFx_CMD_SECTERASE, kinfo->prog_base + bank->sectors[i].offset,
++				0, 0, 0, 0,  0, 0, 0, 0,  NULL);
++
++		if (result != ERROR_OK) {
++			LOG_WARNING("erase sector %d failed", i);
++			return ERROR_FLASH_OPERATION_FAILED;
++		}
++	}
++
++	rv32m1_invalidate_flash_cache(bank);
++
++	return ERROR_OK;
++}
++
++static int rv32m1_make_ram_ready(struct target *target)
++{
++	int result;
++	uint8_t ftfx_fcnfg;
++
++	/* check if ram ready */
++	result = target_read_u8(target, FTFx_FCNFG, &ftfx_fcnfg);
++	if (result != ERROR_OK)
++		return result;
++
++	if (ftfx_fcnfg & (1 << 1))
++		return ERROR_OK;	/* ram ready */
++
++	/* make flex ram available */
++	result = rv32m1_ftfx_command(target, FTFx_CMD_SETFLEXRAM, 0x00ff0000,
++			0, 0, 0, 0,  0, 0, 0, 0,  NULL);
++	if (result != ERROR_OK)
++		return ERROR_FLASH_OPERATION_FAILED;
++
++	/* check again */
++	result = target_read_u8(target, FTFx_FCNFG, &ftfx_fcnfg);
++	if (result != ERROR_OK)
++		return result;
++
++	if (ftfx_fcnfg & (1 << 1))
++		return ERROR_OK;	/* ram ready */
++
++	return ERROR_FLASH_OPERATION_FAILED;
++}
++
++static int rv32m1_write_sections(struct flash_bank *bank, const uint8_t *buffer,
++		uint32_t offset, uint32_t count)
++{
++	int result = ERROR_OK;
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++	uint8_t *buffer_aligned = NULL;
++
++	uint32_t prog_section_chunk_bytes = kinfo->sector_size >> 8;
++	uint32_t prog_size_bytes = kinfo->max_flash_prog_size;
++
++	while (count > 0) {
++		uint32_t size = prog_size_bytes - offset % prog_size_bytes;
++		uint32_t align_begin = offset % prog_section_chunk_bytes;
++		uint32_t align_end;
++		uint32_t size_aligned;
++		uint16_t chunk_count;
++		uint8_t ftfx_fstat;
++
++		if (size > count)
++			size = count;
++
++		align_end = (align_begin + size) % prog_section_chunk_bytes;
++		if (align_end)
++			align_end = prog_section_chunk_bytes - align_end;
++
++		size_aligned = align_begin + size + align_end;
++		chunk_count = size_aligned / prog_section_chunk_bytes;
++
++		if (size != size_aligned) {
++			/* aligned section: the first, the last or the only */
++			if (!buffer_aligned)
++				buffer_aligned = malloc(prog_size_bytes);
++
++			memset(buffer_aligned, 0xff, size_aligned);
++			memcpy(buffer_aligned + align_begin, buffer, size);
++
++			result = target_write_memory(bank->target, FLEXRAM,
++					4, size_aligned / 4, buffer_aligned);
++
++			LOG_DEBUG("section @ " TARGET_ADDR_FMT " aligned begin %" PRIu32 ", end %" PRIu32,
++					bank->base + offset, align_begin, align_end);
++		} else
++			result = target_write_memory(bank->target, FLEXRAM,
++					4, size_aligned / 4, buffer);
++
++		LOG_DEBUG("write section @ " TARGET_ADDR_FMT " with length %" PRIu32 " bytes",
++				bank->base + offset, size);
++
++		if (result != ERROR_OK) {
++			LOG_ERROR("target_write_memory failed");
++			break;
++		}
++
++		/* execute section-write command */
++		result = rv32m1_ftfx_command(bank->target, FTFx_CMD_SECTWRITE,
++				kinfo->prog_base + offset - align_begin,
++				chunk_count>>8, chunk_count, 0, 0,
++				0, 0, 0, 0,  &ftfx_fstat);
++
++		if (result != ERROR_OK) {
++			LOG_ERROR("Error writing section at " TARGET_ADDR_FMT, bank->base + offset);
++			break;
++		}
++
++		if (ftfx_fstat & 0x01)
++			LOG_ERROR("Flash write error at " TARGET_ADDR_FMT, bank->base + offset);
++
++		buffer += size;
++		offset += size;
++		count -= size;
++	}
++
++	free(buffer_aligned);
++	return result;
++}
++
++
++static int rv32m1_write_inner(struct flash_bank *bank, const uint8_t *buffer,
++		uint32_t offset, uint32_t count)
++{
++	int result;
++
++	result = rv32m1_make_ram_ready(bank->target);
++	if (result != ERROR_OK) {
++		LOG_ERROR("FlexRAM not ready.");
++		return result;
++	}
++
++	LOG_DEBUG("flash write @" TARGET_ADDR_FMT, bank->base + offset);
++
++	result = rv32m1_write_sections(bank, buffer, offset, count);
++
++	rv32m1_invalidate_flash_cache(bank);
++
++	return result;
++}
++
++static int rv32m1_write(struct flash_bank *bank, const uint8_t *buffer,
++		uint32_t offset, uint32_t count)
++{
++	int result;
++
++	result = rv32m1_check_run_mode(bank->target);
++	if (result != ERROR_OK)
++		return result;
++
++	return rv32m1_write_inner(bank, buffer, offset, count);
++}
++
++static int rv32m1_probe(struct flash_bank *bank)
++{
++	int result;
++	struct target *target = bank->target;
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++
++	kinfo->probed = false;
++
++	result = target_read_u32(target, SIM_SDID, &kinfo->sim_sdid);
++	if (result != ERROR_OK)
++		return result;
++
++	kinfo->sim_sdid = RV32M1_SDID;
++
++	if (kinfo->sim_sdid != RV32M1_SDID)
++	{
++		LOG_ERROR("Unsupported device, only support RV32M1.");
++		return ERROR_FAIL;
++	}
++
++	/* Flash 0. */
++	if (0 == kinfo->flash_index)
++	{
++		kinfo->max_flash_prog_size = 1<<10;
++		kinfo->flash_support = FS_PROGRAM_SECTOR | FS_PROGRAM_PHRASE | FS_INVALIDATE_CACHE;
++		kinfo->flash_class = FC_PFLASH;
++		bank->size = 1024 * 1024; /* 1M. */
++		bank->base = 0x00000000;
++		kinfo->prog_base = bank->base;
++		kinfo->sector_size = 4 * 1024; /* 4k. */
++		kinfo->protection_size = 16 * 1024; /* 16K. */
++		bank->num_prot_blocks = 64;
++		kinfo->protection_block = 0;
++		bank->num_sectors = bank->size / kinfo->sector_size;
++	}
++	else /* Flash 1. */
++	{
++		kinfo->max_flash_prog_size = 1<<10;
++		kinfo->flash_support = FS_PROGRAM_SECTOR | FS_PROGRAM_PHRASE | FS_INVALIDATE_CACHE;
++		kinfo->flash_class = FC_PFLASH;
++		bank->size = 256 * 1024; /* 256K. */
++		bank->base = 0x01000000;
++		kinfo->prog_base = bank->base;
++		kinfo->sector_size = 2 * 1024; /* 2k. */
++		kinfo->protection_size = 16 * 1024; /* 16K. */
++		bank->num_prot_blocks = 16;
++		kinfo->protection_block = 0;
++		bank->num_sectors = bank->size / kinfo->sector_size;
++	}
++
++	if (bank->num_sectors > 0) {
++		/* FlexNVM bank can be used for EEPROM backup therefore zero sized */
++		bank->sectors = alloc_block_array(0, kinfo->sector_size, bank->num_sectors);
++		if (!bank->sectors)
++			return ERROR_FAIL;
++
++		bank->prot_blocks = alloc_block_array(0, kinfo->protection_size, bank->num_prot_blocks);
++		if (!bank->prot_blocks)
++			return ERROR_FAIL;
++
++	} else {
++		bank->num_prot_blocks = 0;
++	}
++
++	kinfo->probed = true;
++
++	return ERROR_OK;
++}
++
++static int rv32m1_auto_probe(struct flash_bank *bank)
++{
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++
++	if (kinfo && kinfo->probed)
++		return ERROR_OK;
++
++	return rv32m1_probe(bank);
++}
++
++static int rv32m1_info(struct flash_bank *bank, struct command_invocation *cmd)
++{
++	const char *bank_class_names[] = {
++		"(ANY)", "PFlash", "FlexNVM", "FlexRAM"
++	};
++
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++
++	command_print_sameline(cmd,
++			"%s driver for %s flash bank %s at " TARGET_ADDR_FMT "",
++			bank->driver->name, bank_class_names[kinfo->flash_class],
++			bank->name, bank->base);
++
++	return ERROR_OK;
++}
++
++static int rv32m1_blank_check(struct flash_bank *bank)
++{
++	struct rv32m1_flash_bank *kinfo = bank->driver_priv;
++	int result;
++
++	/* suprisingly blank check does not work in VLPR and HSRUN modes */
++	result = rv32m1_check_run_mode(bank->target);
++	if (result != ERROR_OK)
++		return result;
++
++	/* reset error flags */
++	result = rv32m1_ftfx_prepare(bank->target);
++	if (result != ERROR_OK)
++		return result;
++
++	bool block_dirty = false;
++	uint8_t ftfx_fstat;
++
++	if (!block_dirty) {
++		/* check if whole bank is blank */
++		result = rv32m1_ftfx_command(bank->target, FTFx_CMD_BLOCKSTAT, kinfo->prog_base,
++				0, 0, 0, 0,  0, 0, 0, 0, &ftfx_fstat);
++
++		if (result != ERROR_OK || (ftfx_fstat & 0x01))
++			block_dirty = true;
++	}
++
++	if (block_dirty) {
++		/* the whole bank is not erased, check sector-by-sector */
++		unsigned int i;
++		for (i = 0; i < bank->num_sectors; i++) {
++			/* normal margin */
++			result = rv32m1_ftfx_command(bank->target, FTFx_CMD_SECTSTAT,
++					kinfo->prog_base + bank->sectors[i].offset,
++					1, 0, 0, 0,  0, 0, 0, 0, &ftfx_fstat);
++
++			if (result == ERROR_OK) {
++				bank->sectors[i].is_erased = !(ftfx_fstat & 0x01);
++			} else {
++				LOG_DEBUG("Ignoring errored PFlash sector blank-check");
++				bank->sectors[i].is_erased = -1;
++			}
++		}
++	} else {
++		/* the whole bank is erased, update all sectors */
++		unsigned int i;
++		for (i = 0; i < bank->num_sectors; i++)
++			bank->sectors[i].is_erased = 1;
++	}
++
++	return ERROR_OK;
++}
++
++
++static const struct command_registration rv32m1_exec_command_handlers[] = {
++	{
++		.name = "disable_wdog",
++		.mode = COMMAND_EXEC,
++		.help = "Disable the watchdog timer",
++		.usage = "",
++		.handler = rv32m1_disable_wdog_handler,
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++static const struct command_registration rv32m1_command_handler[] = {
++	{
++		.name = "rv32m1",
++		.mode = COMMAND_ANY,
++		.help = "RV32M1 flash controller commands",
++		.usage = "",
++		.chain = rv32m1_exec_command_handlers,
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++struct flash_driver rv32m1_flash = {
++	.name = "rv32m1",
++	.commands = rv32m1_command_handler,
++	.flash_bank_command = rv32m1_flash_bank_command,
++	.erase = rv32m1_erase,
++	.protect = rv32m1_protect,
++	.write = rv32m1_write,
++	.read = default_flash_read,
++	.probe = rv32m1_probe,
++	.auto_probe = rv32m1_auto_probe,
++	.erase_check = rv32m1_blank_check,
++	.protect_check = rv32m1_protect_check,
++	.info = rv32m1_info,
++};
+diff --git a/src/target/Makefile.am b/src/target/Makefile.am
+index 46870922a..659f3b8fa 100644
+--- a/src/target/Makefile.am
++++ b/src/target/Makefile.am
+@@ -24,6 +24,7 @@ noinst_LTLIBRARIES += %D%/libtarget.la
+ 	$(INTEL_IA32_SRC) \
+ 	$(ESIRISC_SRC) \
+         $(ARC_SRC) \
++	$(PULPINO_SRC) \
+ 	%D%/avrt.c \
+ 	%D%/dsp563xx.c \
+ 	%D%/dsp563xx_once.c \
+@@ -262,6 +263,11 @@ ARC_SRC = \
+ 	%D%/arc_mem.h \
+ 	%D%/rtt.h
+ 
++PULPINO_SRC = \
++	%D%/rv32m1/rv32m1_tap_mohor.c \
++	%D%/rv32m1/rv32m1_du_adv.c \
++	%D%/rv32m1/rv32m1.c
++
+ include %D%/openrisc/Makefile.am
+ include %D%/riscv/Makefile.am
+ include %D%/xtensa/Makefile.am
+diff --git a/src/target/rv32m1/rv32m1.c b/src/target/rv32m1/rv32m1.c
+new file mode 100644
+index 000000000..75dd3b081
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1.c
+@@ -0,0 +1,1462 @@
++/***************************************************************************
++ *   Copyright (C) 2011 by Julius Baxter                                   *
++ *   julius@opencores.org                                                  *
++ *                                                                         *
++ *   Copyright (C) 2013 by Marek Czerski                                   *
++ *   ma.czerski@gmail.com                                                  *
++ *                                                                         *
++ *   Copyright (C) 2013 by Franck Jullien                                  *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <jtag/jtag.h>
++#include <target/register.h>
++#include <target/target.h>
++#include <target/breakpoints.h>
++#include <target/target_type.h>
++#include <helper/time_support.h>
++#include <helper/fileio.h>
++#include "rv32m1_tap.h"
++#include "rv32m1.h"
++#include "rv32m1_du.h"
++
++#define MATCH_EBREAK 0x100073
++#define MATCH_C_EBREAK 0x9002
++
++#define MAX_REG_NAME_LEN 12
++
++LIST_HEAD(rv32m1_tap_list);
++LIST_HEAD(rv32m1_du_list);
++
++struct rv32m1_csr_name_map
++{
++	uint16_t index;
++	char * name;
++};
++
++static int rv32m1_remove_breakpoint(struct target *target,
++		struct breakpoint *breakpoint);
++
++static int rv32m1_write_memory(struct target *target, target_addr_t address,
++		uint32_t size, uint32_t count, const uint8_t *buffer);
++static int rv32m1_read_memory(struct target *target, target_addr_t address,
++		uint32_t size, uint32_t count, uint8_t *buffer);
++
++int coreIdx = 0;
++
++uint32_t rv32m1_debug_unit_reg_addr[CORE_NUM] =
++{
++	DEBUG_UNIT0_BASE,
++	DEBUG_UNIT1_BASE,
++};
++
++uint32_t rv32m1_event_unit_reg_addr[CORE_NUM] =
++{
++	EVENT_UNIT0_BASE,
++	EVENT_UNIT1_BASE,
++};
++
++/* Hard breakpoint count. */
++uint32_t rv32m1_hard_bp_count[CORE_NUM] =
++{
++	4, /* RI5CY has 4 breakpoints. */
++	2, /* ZERO-RISCY has 2 breakpoints. */
++};
++
++#define RV32M1_CORE_REG_NUM 34
++
++static const char * core_reg_name[] =
++{
++	"zero",
++	"ra",
++	"sp",
++	"gp",
++	"tp",
++	"t0",
++	"t1",
++	"t2",
++	"s0",
++	"s1",
++	"a0",
++	"a1",
++	"a2",
++	"a3",
++	"a4",
++	"a5",
++	"a6",
++	"a7",
++	"s2",
++	"s3",
++	"s4",
++	"s5",
++	"s6",
++	"s7",
++	"s8",
++	"s9",
++	"s10",
++	"s11",
++	"t3",
++	"t4",
++	"t5",
++	"t6",
++	"npc",
++	"ppc",
++};
++
++const struct rv32m1_csr_name_map rv32m1_csr_names[] =
++{
++	{0x0000, "ustatus"},
++	{0x0005, "utvec"},
++	{0x0014, "uhartid"},
++	{0x0041, "uepc"},
++	{0x0042, "ucause"},
++	{0x0300, "mstatus"},
++	{0x0305, "mtvec"},
++	{0x0341, "mepc"},
++	{0x0342, "mcause"},
++	{0x0f14, "mhartid"},
++	{0x0c10, "privlv"},
++};
++
++static int rv32m1_save_context(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	uint32_t dbg_cause;
++	uint32_t next_pc;
++	struct breakpoint *breakpoint;
++	int retval;
++	uint32_t reg_value;
++
++	LOG_DEBUG("-");
++
++	/* Only handle GPR, NPC, PPC. */
++	/* Read GPR. */
++	for (int i = RV32M1_REG_R0; i <= RV32M1_REG_R31; i++) {
++		retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, GPR[i-RV32M1_REG_R0]), 1,
++				&reg_value);
++		if (retval != ERROR_OK)
++			return retval;
++
++		buf_set_u32(target->reg_cache->reg_list[i].value, 0, 32, reg_value);
++		target->reg_cache->reg_list[i].valid = true;
++		target->reg_cache->reg_list[i].dirty = false;
++	}
++
++	/* Read NPC, PPC. */
++	for (int i = RV32M1_REG_NPC; i <= RV32M1_REG_PPC; i++) {
++		retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_NPC) + (i-RV32M1_REG_NPC) * 4, 1,
++				&reg_value);
++		if (retval != ERROR_OK)
++			return retval;
++
++		buf_set_u32(target->reg_cache->reg_list[i].value, 0, 32, reg_value);
++		target->reg_cache->reg_list[i].valid = true;
++		target->reg_cache->reg_list[i].dirty = false;
++	}
++
++	/* Read CSR */
++	for (uint32_t i=0; i<ARRAY_SIZE(rv32m1_csr_names); i++)
++	{
++		uint32_t reg_idx = rv32m1_csr_names[i].index + RV32M1_REG_CSR0;
++		retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, CSR[rv32m1_csr_names[i].index]),
++				1,
++				&reg_value);
++
++		if (retval != ERROR_OK)
++			return retval;
++
++		buf_set_u32(target->reg_cache->reg_list[reg_idx].value, 0, 32, reg_value);
++		target->reg_cache->reg_list[reg_idx].valid = true;
++		target->reg_cache->reg_list[reg_idx].dirty = false;
++	}
++
++	/* Check if halt because of software break point. */
++	retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag,
++			RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CAUSE), 1,
++			&dbg_cause);
++
++	if (retval != ERROR_OK)
++		return retval;
++
++	/*
++	 * If the core is halt because of software break point. Then the next PC
++	 * should be set to previous PC. Otherwise the original instruction is skipped.
++	 */
++	if (RV32M1_DEBUG_CAUSE_BP == (dbg_cause & RV32M1_DEBUG_CAUSE_MASK))
++	{
++		next_pc = buf_get_u32(target->reg_cache->reg_list[RV32M1_REG_PPC].value, 0, 32);
++		breakpoint = breakpoint_find(target, next_pc);
++
++		if (breakpoint && (BKPT_SOFT == breakpoint->type))
++		{
++			buf_set_u32(target->reg_cache->reg_list[RV32M1_REG_NPC].value, 0, 32, next_pc);
++			target->reg_cache->reg_list[RV32M1_REG_NPC].dirty = true;
++		}
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_restore_context(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	int retval;
++	uint32_t reg_value;
++
++	LOG_DEBUG("-");
++
++	/* Only handle GPR, NPC, PPC. */
++	/* Write GPR. */
++	for (int i = RV32M1_REG_R0; i <= RV32M1_REG_R31; i++) {
++		if (target->reg_cache->reg_list[i].valid && target->reg_cache->reg_list[i].dirty)
++		{
++			LOG_DEBUG("%s: 0x%08x", target->reg_cache->reg_list[i].name, *(uint32_t*)(target->reg_cache->reg_list[i].value));
++			reg_value = buf_get_u32(target->reg_cache->reg_list[i].value, 0, 32);
++			retval = du_core->rv32m1_jtag_write_cpu(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, GPR[i-RV32M1_REG_R0]), 1,
++					&reg_value);
++			if (retval != ERROR_OK)
++				return retval;
++
++			target->reg_cache->reg_list[i].valid = false;
++			target->reg_cache->reg_list[i].dirty = false;
++		}
++	}
++
++	/* Write NPC, PPC. */
++	for (int i = RV32M1_REG_NPC; i <= RV32M1_REG_PPC; i++) {
++		if (target->reg_cache->reg_list[i].valid && target->reg_cache->reg_list[i].dirty)
++		{
++			reg_value = buf_get_u32(target->reg_cache->reg_list[i].value, 0, 32);
++			retval = du_core->rv32m1_jtag_write_cpu(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_NPC) + (i-RV32M1_REG_NPC) * 4, 1,
++					&reg_value);
++			if (retval != ERROR_OK)
++				return retval;
++
++			target->reg_cache->reg_list[i].valid = false;
++			target->reg_cache->reg_list[i].dirty = false;
++		}
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_get_core_reg(struct reg *reg)
++{
++	struct target *target = (struct target *) reg->arch_info;
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	LOG_DEBUG("-");
++
++	if (target->state != TARGET_HALTED)
++		return ERROR_TARGET_NOT_HALTED;
++
++	/* For GPR, PPC, and NPC, read from cache. For CSR, read from HW reg directly. */
++	if (reg->number < RV32M1_CORE_REG_NUM) {
++		buf_set_u32(reg->value, 0, 32, *((uint32_t*)target->reg_cache->reg_list[reg->number].value));
++	} else if (reg->number < RV32M1_REG_CSR0)
++	{
++		/* No such registers. */
++		return ERROR_FAIL;
++	}
++	else
++	{
++		/* Read CSR HW register. */
++		uint32_t reg_value;
++		int retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, CSR[reg->number-RV32M1_REG_CSR0]),
++				1, &reg_value);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while reading CSR 0x%08" PRIx32, reg->number);
++			return retval;
++		}
++		buf_set_u32(reg->value, 0, 32, reg_value);
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_set_core_reg(struct reg *reg, uint8_t *buf)
++{
++	struct target *target = (struct target *) reg->arch_info;
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	uint32_t value = buf_get_u32(buf, 0, 32);
++
++	LOG_DEBUG("-");
++
++	if (target->state != TARGET_HALTED)
++		return ERROR_TARGET_NOT_HALTED;
++
++	/* For GPR, PPC, and NPC, write to cache. For CSR, write to HW reg directly. */
++	if (reg->number < RV32M1_CORE_REG_NUM) {
++		buf_set_u32(target->reg_cache->reg_list[reg->number].value, 0, 32, value);
++		reg->dirty = true;
++		reg->valid = true;
++	} else if (reg->number < RV32M1_REG_CSR0)
++	{
++		/* No such registers. */
++		return ERROR_FAIL;
++	} else {
++		/* Write CSR to HW register. */
++		int retval = du_core->rv32m1_jtag_write_cpu(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, CSR[reg->number-RV32M1_REG_CSR0]),
++				1, &value);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while writing CSR 0x%08" PRIx32, reg->number);
++			return retval;
++		}
++
++		buf_set_u32(target->reg_cache->reg_list[reg->number].value, 0, 32, value);
++
++		reg->dirty = false;
++		reg->valid = true;
++	}
++
++	return ERROR_OK;
++}
++
++static const struct reg_arch_type rv32m1_reg_type = {
++	.get = rv32m1_get_core_reg,
++	.set = rv32m1_set_core_reg,
++};
++
++static int rv32m1_build_reg_cache(struct target *target)
++{
++	struct reg_cache *cache = calloc(sizeof(struct reg_cache), 1);
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++
++	LOG_DEBUG("-");
++
++	/* Build the process context cache */
++	if (0 == coreIdx)
++	{
++		cache->name = "RI5CY registers";
++	}
++	else
++	{
++		cache->name = "Zero RISCY registers";
++	}
++
++	target->reg_cache = cache;
++
++	cache->reg_list = calloc(RV32M1_ALL_REG_NUM, sizeof(struct reg));
++	cache->num_regs = RV32M1_ALL_REG_NUM;
++
++	rv32m1->reg_name_mem = calloc(1, MAX_REG_NAME_LEN * RV32M1_ALL_REG_NUM);
++	if (NULL == rv32m1->reg_name_mem)
++	{
++		return ERROR_FAIL;
++	}
++
++	rv32m1->reg_cache_mem = calloc(4, RV32M1_ALL_REG_NUM);
++	if (NULL == rv32m1->reg_cache_mem)
++	{
++		free(rv32m1->reg_name_mem);
++		rv32m1->reg_name_mem = NULL;;
++		return ERROR_FAIL;
++	}
++
++	/*
++	 * Initialize the register cache and register list. The register list includs
++	 * all registers: GPR, PPC, NPC, and CSR, but only the GPR, PPC, and NPC
++	 * use this software cache mechanism, when accessing CSR, touch HW reg directly.
++	 */
++	char *reg_name = rv32m1->reg_name_mem;
++	uint32_t i = 0, j = 0;
++
++	for (i = 0; i < RV32M1_ALL_REG_NUM; i++) {
++		cache->reg_list[i].size = 32;
++		cache->reg_list[i].value = &(rv32m1->reg_cache_mem[i]);
++		cache->reg_list[i].dirty = false;
++		cache->reg_list[i].valid = false;
++		cache->reg_list[i].type = &rv32m1_reg_type;
++		cache->reg_list[i].arch_info = target;
++		cache->reg_list[i].number = i;
++		cache->reg_list[i].exist = false;
++
++		if (i<RV32M1_CORE_REG_NUM)
++		{
++			sprintf(reg_name, "%s", core_reg_name[i]);
++			cache->reg_list[i].exist = true;
++		}
++		else if (i<RV32M1_REG_CSR0)
++		{
++			cache->reg_list[i].exist = false;
++			sprintf(reg_name, "%s", "reserved");
++		}
++		else
++		{
++			/* Search reg name. */
++			for (j=0; j<ARRAY_SIZE(rv32m1_csr_names); j++)
++			{
++				if (rv32m1_csr_names[j].index == (i-RV32M1_REG_CSR0))
++				{
++					break;
++				}
++			}
++
++			if (j >= ARRAY_SIZE(rv32m1_csr_names))
++			{
++				/* No register name defined. */
++				sprintf(reg_name, "csr%d", i - RV32M1_REG_CSR0);
++			}
++			else
++			{
++				sprintf(reg_name, "%s", rv32m1_csr_names[j].name);
++				cache->reg_list[i].exist = true;
++			}
++		}
++
++		if (reg_name[0]) {
++			cache->reg_list[i].name = reg_name;
++		}
++		reg_name += strlen(reg_name) + 1;
++		assert(reg_name < rv32m1->reg_name_mem + RV32M1_ALL_REG_NUM * MAX_REG_NAME_LEN);
++	}
++
++	return ERROR_OK;;
++}
++
++static int rv32m1_debug_entry(struct target *target)
++{
++	LOG_DEBUG("-");
++
++	int retval = rv32m1_save_context(target);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while calling rv32m1_save_context");
++		return retval;
++	}
++
++	return retval;
++}
++
++static int rv32m1_halt(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	LOG_DEBUG("target->state: %s",
++			target_state_name(target));
++
++	if (target->state == TARGET_HALTED) {
++		LOG_DEBUG("Target was already halted");
++		return ERROR_OK;
++	}
++
++	if (target->state == TARGET_UNKNOWN)
++		LOG_WARNING("Target was in unknown state when halt was requested");
++
++	if (target->state == TARGET_RESET) {
++		if ((jtag_get_reset_config() & RESET_SRST_PULLS_TRST) &&
++				jtag_get_srst()) {
++			LOG_ERROR("Can't request a halt while in reset if nSRST pulls nTRST");
++			return ERROR_TARGET_FAILURE;
++		} else {
++			target->debug_reason = DBG_REASON_DBGRQ;
++			return ERROR_OK;
++		}
++	}
++
++	int retval = du_core->rv32m1_cpu_stall(&rv32m1->jtag, CPU_STALL);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Impossible to stall the CPU");
++		return retval;
++	}
++
++	target->debug_reason = DBG_REASON_DBGRQ;
++
++	return ERROR_OK;
++}
++
++static int rv32m1_is_cpu_running(struct target *target, int *running)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	int retval;
++	int tries = 0;
++	const int RETRIES_MAX = 5;
++
++	/* Have a retry loop to determine of the CPU is running.
++	   If target has been hard reset for any reason, it might take a couple
++	   of goes before it's ready again.
++	   */
++	while (tries < RETRIES_MAX) {
++
++		tries++;
++
++		retval = du_core->rv32m1_is_cpu_running(&rv32m1->jtag, running);
++		if (retval != ERROR_OK) {
++			LOG_WARNING("Debug IF CPU control reg read failure.");
++			/* Try once to restart the JTAG infrastructure -
++			   quite possibly the board has just been reset. */
++			LOG_WARNING("Resetting JTAG TAP state and reconnectiong to debug IF.");
++			du_core->rv32m1_jtag_init(&rv32m1->jtag);
++
++			LOG_WARNING("...attempt %d of %d", tries, RETRIES_MAX);
++
++			alive_sleep(2);
++
++			continue;
++		} else
++			return ERROR_OK;
++	}
++
++	LOG_ERROR("Could not re-establish communication with target");
++	return retval;
++}
++
++static int rv32m1_poll(struct target *target)
++{
++	int retval;
++	int running;
++
++	retval = rv32m1_is_cpu_running(target, &running);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while calling rv32m1_is_cpu_running");
++		return retval;
++	}
++
++	/* check for processor halted */
++	if (!running) {
++		/* It's actually stalled, so update our software's state */
++		if ((target->state == TARGET_RUNNING) ||
++				(target->state == TARGET_RESET)) {
++
++			target->state = TARGET_HALTED;
++
++			retval = rv32m1_debug_entry(target);
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while calling rv32m1_debug_entry");
++				return retval;
++			}
++
++			target_call_event_callbacks(target,
++					TARGET_EVENT_HALTED);
++		} else if (target->state == TARGET_DEBUG_RUNNING) {
++			target->state = TARGET_HALTED;
++
++			retval = rv32m1_debug_entry(target);
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while calling rv32m1_debug_entry");
++				return retval;
++			}
++
++			target_call_event_callbacks(target,
++					TARGET_EVENT_DEBUG_HALTED);
++		}
++	} else { /* ... target is running */
++
++		target->state = TARGET_RUNNING;
++
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_assert_reset(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	int retval;
++
++	LOG_DEBUG("-");
++
++	retval = rv32m1_halt(target);
++
++	if (ERROR_OK != retval)
++		return retval;
++
++	target->state = TARGET_RESET;
++
++	retval = du_core->rv32m1_cpu_reset(&rv32m1->jtag, CPU_RESET);
++
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while asserting RESET");
++		return retval;
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_deassert_reset(struct target *target)
++{
++	int retval;
++
++	/* Registers are now invalid */
++	register_cache_invalidate(target->reg_cache);
++
++	if (!target->reset_halt) {
++
++		uint32_t debug_ctrl = 0x0;
++
++		retval = rv32m1_write_memory(target,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CTRL),
++				4,
++				1,
++				(const uint8_t*)&debug_ctrl);
++
++		if (retval != ERROR_OK) {
++			return retval;
++		}
++
++		target->state = TARGET_RUNNING;
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_soft_reset_halt(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	LOG_DEBUG("-");
++
++	int retval = du_core->rv32m1_cpu_stall(&rv32m1->jtag, CPU_STALL);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while stalling the CPU");
++		return retval;
++	}
++
++	retval = rv32m1_assert_reset(target);
++	if (retval != ERROR_OK)
++		return retval;
++
++	retval = rv32m1_deassert_reset(target);
++	if (retval != ERROR_OK)
++		return retval;
++
++	return ERROR_OK;
++}
++
++static bool is_any_soft_breakpoint(struct target *target)
++{
++	struct breakpoint *breakpoint = target->breakpoints;
++
++	LOG_DEBUG("-");
++
++	while (breakpoint)
++	{
++		if (breakpoint->type == BKPT_SOFT)
++			return true;
++
++		breakpoint = breakpoint->next;
++	}
++
++	return false;
++}
++
++static int rv32m1_resume_or_step(struct target *target, int current,
++		uint32_t address, int handle_breakpoints,
++		int debug_execution, int step)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	struct breakpoint *breakpoint = NULL;
++	uint32_t resume_pc;
++
++	LOG_DEBUG("Addr: 0x%" PRIx32 ", current: %s, stepping: %s, handle breakpoints %s\n",
++			address, current ? "yes":"no", step ? "yes" : "no", handle_breakpoints ? "yes" : "no");
++
++	if (target->state != TARGET_HALTED) {
++		LOG_ERROR("Target not halted");
++		return ERROR_TARGET_NOT_HALTED;
++	}
++
++	if (!debug_execution)
++		target_free_all_working_areas(target);
++
++	/* current ? continue on current pc : continue at <address> */
++	if (!current)
++	{
++		buf_set_u32(target->reg_cache->reg_list[RV32M1_REG_NPC].value, 0,
++				32, address);
++		target->reg_cache->reg_list[RV32M1_REG_NPC].dirty = true;
++		target->reg_cache->reg_list[RV32M1_REG_NPC].valid = true;
++	}
++
++	int retval = rv32m1_restore_context(target);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while calling rv32m1_restore_context");
++		return retval;
++	}
++
++	resume_pc = buf_get_u32(target->reg_cache->reg_list[RV32M1_REG_NPC].value,
++			0, 32);
++
++	/* The front-end may request us not to handle breakpoints */
++	if (handle_breakpoints) {
++		/* Single step past breakpoint at current address */
++		breakpoint = breakpoint_find(target, resume_pc);
++		if (breakpoint) {
++			LOG_DEBUG("Unset breakpoint at 0x%08" TARGET_PRIxADDR, breakpoint->address);
++			retval = rv32m1_remove_breakpoint(target, breakpoint);
++			if (retval != ERROR_OK)
++				return retval;
++		}
++	}
++
++	uint32_t debug_reg;
++
++	if (is_any_soft_breakpoint(target) == true)
++	{
++		retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_IE), 1, &debug_reg);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while reading DEBUG IE");
++			return retval;
++		}
++
++		debug_reg |= RV32M1_DEBUG_IE_BP;
++		retval = du_core->rv32m1_jtag_write_cpu(&rv32m1->jtag, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_IE), 1, &debug_reg);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while writing DEBUG IE");
++			return retval;
++		}
++	}
++
++	if (step)
++	{
++		/* Set the single step trigger. */
++		debug_reg = RV32M1_DEBUG_CTRL_SSTE;
++	}
++	else
++	{
++		/* Clear the single step trigger. */
++		debug_reg = 0U;
++	}
++
++	retval = du_core->rv32m1_jtag_write_cpu(&rv32m1->jtag, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CTRL), 1, &debug_reg);
++
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while writing DEBUG CTRL");
++		return retval;
++	}
++
++	if (step)
++		target->debug_reason = DBG_REASON_SINGLESTEP;
++	else
++		target->debug_reason = DBG_REASON_NOTHALTED;
++
++	/* Registers are now invalid */
++	register_cache_invalidate(target->reg_cache);
++
++	if (!debug_execution) {
++		target->state = TARGET_RUNNING;
++		target_call_event_callbacks(target, TARGET_EVENT_RESUMED);
++		LOG_DEBUG("Target resumed at 0x%08" PRIx32, resume_pc);
++	} else {
++		target->state = TARGET_DEBUG_RUNNING;
++		target_call_event_callbacks(target, TARGET_EVENT_DEBUG_RESUMED);
++		LOG_DEBUG("Target debug resumed at 0x%08" PRIx32, resume_pc);
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_resume(struct target *target, int current,
++		target_addr_t address, int handle_breakpoints, int debug_execution)
++{
++	return rv32m1_resume_or_step(target, current, address,
++			handle_breakpoints,
++			debug_execution,
++			NO_SINGLE_STEP);
++}
++
++static int rv32m1_step(struct target *target, int current,
++		target_addr_t address, int handle_breakpoints)
++{
++	return rv32m1_resume_or_step(target, current, address,
++			handle_breakpoints,
++			0,
++			SINGLE_STEP);
++}
++
++static int rv32m1_add_breakpoint(struct target *target,
++		struct breakpoint *breakpoint)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	uint32_t data;
++	int retval;
++
++	LOG_DEBUG("Adding breakpoint: addr 0x%08" TARGET_PRIxADDR ", len %d, type %d, set: %d, id: %" PRId32,
++			breakpoint->address, breakpoint->length, breakpoint->type,
++			breakpoint->is_set, breakpoint->unique_id);
++
++	if (breakpoint->is_set) {
++		LOG_WARNING("breakpoint (BPID: %" PRIu32 ") already set", breakpoint->unique_id);
++		return ERROR_OK;
++	}
++
++	/* Handle hard breakpoint. */
++	if (breakpoint->type == BKPT_HARD)
++	{
++		for (uint8_t i=0; i<rv32m1_hard_bp_count[coreIdx]; i++)
++		{
++			retval = du_core->rv32m1_jtag_read_memory(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].CTRL), 4, 1, (uint8_t*)(&data));
++
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while checking breakpoint control register 0x%08" PRIx32,
++						RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].CTRL));
++				return retval;
++			}
++
++			if ((data & 0x01) == 0x00) /* If available breakpoint. */
++			{
++				retval = du_core->rv32m1_jtag_write_memory(&rv32m1->jtag,
++						RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].DATA), 4, 1,
++						(uint8_t*)(&breakpoint->address));
++
++				if (retval != ERROR_OK) {
++					LOG_ERROR("Error while set the breakpoint address.");
++					return retval;
++				}
++
++				data = 1;
++				retval = du_core->rv32m1_jtag_write_memory(&rv32m1->jtag,
++						RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].CTRL), 4, 1, (uint8_t *)(&data));
++
++				if (retval != ERROR_OK) {
++					LOG_ERROR("Error while set the breakpoint available.");
++					return retval;
++				}
++
++				breakpoint->is_set = true;
++
++				return ERROR_OK;
++			}
++		}
++
++		LOG_ERROR("Can not add more hardware breakpoint");
++		return ERROR_TARGET_RESOURCE_NOT_AVAILABLE;
++	}
++	else /* Soft breakpoint. */
++	{
++		/* Enable the breakpoint in debug unit.*/
++		retval = du_core->rv32m1_jtag_read_memory(&rv32m1->jtag,
++				RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_IE), 4, 1, (uint8_t*)(&data));
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while reading register DBG_IE");
++			return retval;
++		}
++
++		if (RV32M1_DEBUG_IE_BP != (data & RV32M1_DEBUG_IE_BP))
++		{
++			data |= RV32M1_DEBUG_IE_BP;
++
++			retval = du_core->rv32m1_jtag_write_memory(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_IE), 4, 1, (uint8_t*)(&data));
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while writing register DBG_IE");
++				return retval;
++			}
++		}
++
++		/* Read and save the instruction */
++		retval = rv32m1_read_memory(target,
++				breakpoint->address,
++				breakpoint->length,
++				1,
++				(uint8_t*)(&data));
++
++		/* Detect Instruction length at breakpoint address again
++		   Some older version GDB dose not handle compressed instruction correct */
++		int instruction_len = rv32m1_chk_instruction_len(data);
++
++		if (instruction_len <= 0)
++		{
++			LOG_ERROR("Error while detecting instruction length at 0x%08" TARGET_PRIxADDR ", instruction 0x%08x",
++					breakpoint->address, data);
++			retval = ERROR_FAIL;
++			return retval;
++		}
++
++		if (instruction_len != breakpoint->length)
++		{
++			LOG_WARNING("Warning at addr: 0x%08" TARGET_PRIxADDR ", instruction len reported by debugger is %d, detected is %d",
++					breakpoint->address, breakpoint->length, instruction_len);
++		}
++
++		/* Corrected Breakpoint length */
++		breakpoint->length = instruction_len;
++		LOG_DEBUG("BRKP: addr: 0x%08" TARGET_PRIxADDR ", inst len: %d", breakpoint->address, instruction_len);
++
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while reading the instruction at 0x%08" TARGET_PRIxADDR,
++					breakpoint->address);
++			return retval;
++		}
++
++		if (breakpoint->orig_instr != NULL)
++			free(breakpoint->orig_instr);
++
++		breakpoint->orig_instr = malloc(breakpoint->length);
++		memcpy(breakpoint->orig_instr, &data, breakpoint->length);
++
++		if (breakpoint->length == 4) {
++			retval = target_write_u32(target, breakpoint->address, MATCH_EBREAK);
++		} else {
++			retval = target_write_u16(target, breakpoint->address, MATCH_C_EBREAK);
++		}
++		if (retval != ERROR_OK) {
++			free(breakpoint->orig_instr);
++			LOG_ERROR("Failed to write %d-byte breakpoint instruction at 0x%08" TARGET_PRIxADDR,
++					breakpoint->length, breakpoint->address);
++			return ERROR_FAIL;
++		}
++
++		/* TODO:
++		 * Maintain I-Cache here.
++		 */
++		breakpoint->is_set = true;
++
++		return ERROR_OK;
++	}
++}
++
++static int rv32m1_remove_breakpoint(struct target *target,
++		struct breakpoint *breakpoint)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	uint32_t data;
++	int retval;
++
++	LOG_DEBUG("Removing breakpoint: addr 0x%08" TARGET_PRIxADDR ", len %d, type %d, set: %d, id: %" PRId32,
++			breakpoint->address, breakpoint->length, breakpoint->type,
++			breakpoint->is_set, breakpoint->unique_id);
++
++	if (breakpoint->type == BKPT_HARD)
++	{
++		for (uint8_t i=0; i<rv32m1_hard_bp_count[coreIdx]; i++)
++		{
++			retval = du_core->rv32m1_jtag_read_memory(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].DATA),
++					4,
++					1,
++					(uint8_t *)(&data));
++
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while checking breakpoint data register 0x%08" PRIx32,
++						RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].DATA));
++				return retval;
++			}
++
++			if (data == breakpoint->address)
++			{
++				/* Breakpoint found, disable it. */
++				data = 0;
++				retval = du_core->rv32m1_jtag_write_memory(&rv32m1->jtag,
++						RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].CTRL),
++						4,
++						1,
++						(uint8_t *)(&data));
++
++				if (retval != ERROR_OK) {
++					LOG_ERROR("Error while disable the breakpoint.");
++					return retval;
++				}
++
++				return ERROR_OK;
++			}
++		}
++
++		return ERROR_FAIL;
++	}
++
++	/* Replace the removed instruction */
++	retval = rv32m1_write_memory(target,
++			breakpoint->address,
++			breakpoint->length,
++			1,
++			breakpoint->orig_instr);
++
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while writing back the instruction at 0x%08" TARGET_PRIxADDR,
++				breakpoint->address);
++		return retval;
++	}
++
++	/* TODO:
++	 * Maintain I-Cache here.
++	 */
++
++	return ERROR_OK;
++}
++
++static int rv32m1_add_watchpoint(struct target *target,
++		struct watchpoint *watchpoint)
++{
++	LOG_ERROR("%s: implement me", __func__);
++	return ERROR_OK;
++}
++
++static int rv32m1_remove_watchpoint(struct target *target,
++		struct watchpoint *watchpoint)
++{
++	LOG_ERROR("%s: implement me", __func__);
++	return ERROR_OK;
++}
++
++static int rv32m1_read_memory(struct target *target, target_addr_t address,
++		uint32_t size, uint32_t count, uint8_t *buffer)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	LOG_DEBUG("Read memory at 0x%08" TARGET_PRIxADDR ", size: %" PRIu32 ", count: 0x%08" PRIx32, address, size, count);
++
++	/* Sanitize arguments */
++	if (((size != 4) && (size != 2) && (size != 1)) || (count == 0) || !buffer) {
++		LOG_ERROR("Bad arguments");
++		return ERROR_COMMAND_SYNTAX_ERROR;
++	}
++
++	/* Handle the unaligned access. */
++	if (1 == (address & 0x01))
++	{
++		count = size * count;
++		size = 1;
++	}
++	else if (2 == (address & 0x03))
++	{
++		count = size * count / 2;
++		size = 2;
++	}
++
++	return du_core->rv32m1_jtag_read_memory(&rv32m1->jtag, address, size, count, buffer);
++}
++
++static int rv32m1_write_memory(struct target *target, target_addr_t address,
++		uint32_t size, uint32_t count, const uint8_t *buffer)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	LOG_DEBUG("Write memory at 0x%08" TARGET_PRIxADDR ", size: %" PRIu32 ", count: 0x%08" PRIx32, address, size, count);
++
++	/* Sanitize arguments */
++	if (((size != 4) && (size != 2) && (size != 1)) || (count == 0) || !buffer) {
++		LOG_ERROR("Bad arguments");
++		return ERROR_COMMAND_SYNTAX_ERROR;
++	}
++
++	/* Handle the unaligned access. */
++	if (1 == (address & 0x01))
++	{
++		count = size * count;
++		size = 1;
++	}
++	else if (2 == (address & 0x03))
++	{
++		count = size * count / 2;
++		size = 2;
++	}
++
++	return du_core->rv32m1_jtag_write_memory(&rv32m1->jtag, address, size, count, buffer);
++}
++
++static int rv32m1_init_target(struct command_context *cmd_ctx,
++		struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	struct rv32m1_jtag *jtag = &rv32m1->jtag;
++
++	if (du_core == NULL) {
++		LOG_ERROR("No debug unit selected");
++		return ERROR_FAIL;
++	}
++
++	if (jtag->tap_ip == NULL) {
++		LOG_ERROR("No tap selected");
++		return ERROR_FAIL;
++	}
++
++	rv32m1->jtag.tap = target->tap;
++	rv32m1->jtag.rv32m1_jtag_inited = 0;
++	rv32m1->jtag.rv32m1_jtag_module_selected = -1;
++	rv32m1->jtag.target = target;
++
++	return rv32m1_build_reg_cache(target);
++}
++
++static void rv32m1_deinit_target(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++
++	free(rv32m1->reg_cache_mem);
++
++	free(rv32m1->reg_name_mem);
++
++	free(rv32m1);
++}
++
++static int rv32m1_target_create(struct target *target, Jim_Interp *interp)
++{
++	if (target->tap == NULL)
++		return ERROR_FAIL;
++
++	struct rv32m1_info *rv32m1 = calloc(1, sizeof(struct rv32m1_info));
++
++	target->arch_info = rv32m1;
++
++	rv32m1_tap_mohor_register();
++
++	rv32m1_du_adv_register();
++
++	return ERROR_OK;
++}
++
++static int rv32m1_examine(struct target *target)
++{
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++
++	if (!target_was_examined(target)) {
++
++		target_set_examined(target);
++
++		int running;
++		uint32_t data = 0;
++
++		int retval = du_core->rv32m1_is_cpu_running(&rv32m1->jtag, &running);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Couldn't read the CPU state");
++			return retval;
++		} else {
++			if (running)
++				target->state = TARGET_RUNNING;
++			else {
++				LOG_DEBUG("Target is halted");
++
++				/* This is the first time we examine the target,
++				 * it is stalled and we don't know why. Let's
++				 * assume this is because of a debug reason.
++				 */
++				if (target->state == TARGET_UNKNOWN)
++					target->debug_reason = DBG_REASON_DBGRQ;
++
++				target->state = TARGET_HALTED;
++			}
++		}
++
++		/* Clear all hardware breakpoints. */
++		for (uint8_t i=0; i<rv32m1_hard_bp_count[coreIdx]; i++)
++		{
++			retval = du_core->rv32m1_jtag_write_memory(&rv32m1->jtag,
++					RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_BP[i].CTRL), 4, 1, (uint8_t *)(&data));
++
++			if (retval != ERROR_OK) {
++				LOG_ERROR("Error while clear the breakpoints.");
++				return retval;
++			}
++		}
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_arch_state(struct target *target)
++{
++	return ERROR_OK;
++}
++
++static int rv32m1_get_gdb_reg_list(struct target *target, struct reg **reg_list[],
++		int *reg_list_size, enum target_register_class reg_class)
++{
++	if (reg_class == REG_CLASS_GENERAL) {
++		/* We will have this called whenever GDB connects. */
++		*reg_list_size = RV32M1_CORE_REG_NUM;
++	} else {
++		*reg_list_size = RV32M1_ALL_REG_NUM;
++	}
++
++	/* this is free()'d back in gdb_server.c's gdb_get_register_packet() */
++	*reg_list = malloc((*reg_list_size) * sizeof(struct reg *));
++
++	if (*reg_list == NULL)
++		return ERROR_FAIL;
++
++	for (int i = 0; i < *reg_list_size; i++)
++		(*reg_list)[i] = &target->reg_cache->reg_list[i];
++
++	return ERROR_OK;
++}
++
++int rv32m1_get_gdb_fileio_info(struct target *target, struct gdb_fileio_info *fileio_info)
++{
++	return ERROR_FAIL;
++}
++
++static int rv32m1_checksum_memory(struct target *target, target_addr_t address,
++		uint32_t count, uint32_t *checksum) {
++
++	return ERROR_FAIL;
++}
++
++static int rv32m1_profiling(struct target *target, uint32_t *samples,
++		uint32_t max_num_samples, uint32_t *num_samples, uint32_t seconds)
++{
++	struct timeval timeout, now;
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_du *du_core = rv32m1_to_du(rv32m1);
++	int retval = ERROR_OK;
++
++	gettimeofday(&timeout, NULL);
++	timeval_add_time(&timeout, seconds, 0);
++
++	LOG_INFO("Starting rv32m1 profiling. Sampling npc as fast as we can...");
++
++	/* Make sure the target is running */
++	target_poll(target);
++	if (target->state == TARGET_HALTED)
++		retval = target_resume(target, 1, 0, 0, 0);
++
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while resuming target");
++		return retval;
++	}
++
++	uint32_t sample_count = 0;
++
++	for (;;) {
++		uint32_t reg_value;
++		retval = du_core->rv32m1_jtag_read_cpu(&rv32m1->jtag, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_NPC) /* NPC */, 1, &reg_value);
++		if (retval != ERROR_OK) {
++			LOG_ERROR("Error while reading NPC");
++			return retval;
++		}
++
++		samples[sample_count++] = reg_value;
++
++		gettimeofday(&now, NULL);
++		if ((sample_count >= max_num_samples) ||
++				((now.tv_sec >= timeout.tv_sec) && (now.tv_usec >= timeout.tv_usec))) {
++			LOG_INFO("Profiling completed. %" PRIu32 " samples.", sample_count);
++			break;
++		}
++	}
++
++	*num_samples = sample_count;
++	return retval;
++}
++
++COMMAND_HANDLER(rv32m1_tap_select_command_handler)
++{
++	struct target *target = get_current_target(CMD_CTX);
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_jtag *jtag = &rv32m1->jtag;
++	struct rv32m1_tap_ip *rv32m1_tap;
++
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	list_for_each_entry(rv32m1_tap, &rv32m1_tap_list, list) {
++		if (rv32m1_tap->name) {
++			if (!strcmp(CMD_ARGV[0], rv32m1_tap->name)) {
++				jtag->tap_ip = rv32m1_tap;
++				LOG_INFO("%s tap selected", rv32m1_tap->name);
++				return ERROR_OK;
++			}
++		}
++	}
++
++	LOG_ERROR("%s unknown, no tap selected", CMD_ARGV[0]);
++	return ERROR_COMMAND_SYNTAX_ERROR;
++}
++
++COMMAND_HANDLER(rv32m1_core_select_command_handler)
++{
++	if (CMD_ARGC != 1)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	coreIdx = atoi(CMD_ARGV[0]);
++
++	/* Use core 0 by default. */
++	if (coreIdx > CORE_NUM)
++	{
++		LOG_WARNING("Invalid core index, use index 0");
++		coreIdx = 0;
++	}
++
++	LOG_INFO("core %d selected", coreIdx);
++
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(rv32m1_tap_list_command_handler)
++{
++	struct rv32m1_tap_ip *rv32m1_tap;
++
++	if (CMD_ARGC != 0)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	list_for_each_entry(rv32m1_tap, &rv32m1_tap_list, list) {
++		if (rv32m1_tap->name)
++			command_print(CMD, "%s", rv32m1_tap->name);
++	}
++
++	return ERROR_OK;
++}
++
++COMMAND_HANDLER(rv32m1_du_select_command_handler)
++{
++	struct target *target = get_current_target(CMD_CTX);
++	struct rv32m1_info *rv32m1 = target_to_rv32m1(target);
++	struct rv32m1_jtag *jtag = &rv32m1->jtag;
++	struct rv32m1_du *rv32m1_du;
++
++	if (CMD_ARGC > 2)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	list_for_each_entry(rv32m1_du, &rv32m1_du_list, list) {
++		if (rv32m1_du->name) {
++			if (!strcmp(CMD_ARGV[0], rv32m1_du->name)) {
++				jtag->du_core = rv32m1_du;
++				LOG_INFO("%s debug unit selected", rv32m1_du->name);
++
++				if (CMD_ARGC == 2) {
++					int options;
++					COMMAND_PARSE_NUMBER(int, CMD_ARGV[1], options);
++					rv32m1_du->options = options;
++					LOG_INFO("Option %x is passed to %s debug unit"
++							, options, rv32m1_du->name);
++				}
++
++				return ERROR_OK;
++			}
++		}
++	}
++
++	LOG_ERROR("%s unknown, no debug unit selected", CMD_ARGV[0]);
++	return ERROR_COMMAND_SYNTAX_ERROR;
++}
++
++COMMAND_HANDLER(rv32m1_du_list_command_handler)
++{
++	struct rv32m1_du *rv32m1_du;
++
++	if (CMD_ARGC != 0)
++		return ERROR_COMMAND_SYNTAX_ERROR;
++
++	list_for_each_entry(rv32m1_du, &rv32m1_du_list, list) {
++		if (rv32m1_du->name)
++			command_print(CMD, "%s", rv32m1_du->name);
++	}
++
++	return ERROR_OK;
++}
++
++static const struct command_registration rv32m1_hw_ip_command_handlers[] = {
++	{
++		"tap_select",
++		.handler = rv32m1_tap_select_command_handler,
++		.mode = COMMAND_ANY,
++		.usage = "tap_select name",
++		.help = "Select the TAP core to use",
++	},
++	{
++		"tap_list",
++		.handler = rv32m1_tap_list_command_handler,
++		.mode = COMMAND_ANY,
++		.usage = "tap_list",
++		.help = "Display available TAP core",
++	},
++	{
++		"du_select",
++		.handler = rv32m1_du_select_command_handler,
++		.mode = COMMAND_ANY,
++		.usage = "du_select name",
++		.help = "Select the Debug Unit core to use",
++	},
++	{
++		"du_list",
++		.handler = rv32m1_du_list_command_handler,
++		.mode = COMMAND_ANY,
++		.usage = "select_tap name",
++		.help = "Display available Debug Unit core",
++	},
++	{
++		"core_select",
++		.handler = rv32m1_core_select_command_handler,
++		.mode = COMMAND_ANY,
++		.usage = "core_select index",
++		.help = "Select the the core, 0 or 1",
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++static const struct command_registration rv32m1_command_handlers[] = {
++	{
++		.chain = rv32m1_hw_ip_command_handlers,
++	},
++	COMMAND_REGISTRATION_DONE
++};
++
++
++struct target_type rv32m1_target = {
++	.name = "rv32m1",
++
++	.poll = rv32m1_poll,
++	.arch_state = rv32m1_arch_state,
++
++	.target_request_data = NULL,
++
++	.halt = rv32m1_halt,
++	.resume = rv32m1_resume,
++	.step = rv32m1_step,
++
++	.assert_reset = rv32m1_assert_reset,
++	.deassert_reset = rv32m1_deassert_reset,
++	.soft_reset_halt = rv32m1_soft_reset_halt,
++
++	.get_gdb_reg_list = rv32m1_get_gdb_reg_list,
++
++	.read_memory = rv32m1_read_memory,
++	.write_memory = rv32m1_write_memory,
++	.checksum_memory = rv32m1_checksum_memory,
++
++	.commands = rv32m1_command_handlers,
++	.add_breakpoint = rv32m1_add_breakpoint,
++	.remove_breakpoint = rv32m1_remove_breakpoint,
++	.add_watchpoint = rv32m1_add_watchpoint,
++	.remove_watchpoint = rv32m1_remove_watchpoint,
++
++	.target_create = rv32m1_target_create,
++	.init_target = rv32m1_init_target,
++	.deinit_target = rv32m1_deinit_target,
++	.examine = rv32m1_examine,
++
++	.get_gdb_fileio_info = rv32m1_get_gdb_fileio_info,
++
++	.profiling = rv32m1_profiling,
++};
+diff --git a/src/target/rv32m1/rv32m1.h b/src/target/rv32m1/rv32m1.h
+new file mode 100644
+index 000000000..608017ba4
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1.h
+@@ -0,0 +1,162 @@
++/***************************************************************************
++ *   Copyright (C) 2011 by Julius Baxter                                   *
++ *   julius@opencores.org                                                  *
++ *                                                                         *
++ *   Copyright (C) 2013 by Marek Czerski                                   *
++ *   ma.czerski@gmail.com                                                  *
++ *                                                                         *
++ *   Copyright (C) 2013 by Franck Jullien                                  *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifndef OPENOCD_TARGET_RV32M1_H
++#define OPENOCD_TARGET_RV32M1_H
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <target/target.h>
++
++#ifndef offsetof
++#define offsetof(st, m) __builtin_offsetof(st, m)
++#endif
++
++/*
++ * Support two cores:
++ * Debug unit 0 for core 0, debug unit 1 for core 1.
++ */
++#define CORE_NUM 2
++
++#define DEBUG_UNIT0_BASE        (0xF9000000)
++#define DEBUG_UNIT1_BASE        (0xF9008000)
++#define EVENT_UNIT0_BASE        (0xE0041000)
++#define EVENT_UNIT1_BASE        (0x4101F000)
++
++#define DEBUG_GPR_OFFSET 0x400
++#define DEBUG_FPR_OFFSET 0x500
++#define DEBUG_REG_OFFSET 0x2000
++#define DEBUG_CSR_OFFSET 0x4000
++
++/* RV32M1 registers */
++enum rv32m1_reg_nums {
++	RV32M1_REG_R0 = 0,
++	RV32M1_REG_R31 = 31,
++	RV32M1_REG_NPC = 32,
++	RV32M1_REG_PPC = 33,
++	RV32M1_CORE_REG_NUM,
++	RV32M1_REG_CSR0 = 65,
++	RV32M1_REG_CSR4095 = 4160,
++	RV32M1_ALL_REG_NUM
++};
++
++struct rv32m1_debug_unit {
++	volatile uint32_t DBG_CTRL;      /* Offset 0x0000. */
++	volatile uint32_t DBG_HIT;       /* Offset 0x0004. */
++	volatile uint32_t DBG_IE;        /* Offset 0x0008. */
++	volatile uint32_t DBG_CAUSE;     /* Offset 0x000c. */
++	uint8_t reserved0[0x30];
++	struct rv32m1_debug_bp {
++		volatile uint32_t CTRL;
++		volatile uint32_t DATA;
++	} DBG_BP[8];                     /* Offset 0x0040. */
++	uint8_t reserved1[0x380];
++	volatile uint32_t GPR[32];       /* Offset 0x0400. */
++	uint8_t reserved2[0x80];
++	volatile uint32_t FPR_LSP[32];   /* Offset 0x0500. */
++	volatile uint32_t FPR_MSP[32];   /* Offset 0x0580. */
++	uint8_t reserved3[0x1A00];
++	volatile uint32_t DBG_NPC;       /* Offset 0x2000. */
++	volatile uint32_t DBG_PPC;       /* Offset 0x2004. */
++	uint8_t reserved4[0x1FF8];
++	volatile uint32_t CSR[4906];     /* Offset 0x4000. */
++};
++
++extern int coreIdx;
++extern uint32_t rv32m1_debug_unit_reg_addr[];
++extern uint32_t rv32m1_event_unit_reg_addr[];
++
++struct rv32m1_jtag {
++	struct jtag_tap *tap;
++	int rv32m1_jtag_inited;
++	int rv32m1_jtag_module_selected;
++	uint8_t *current_reg_idx;
++	struct rv32m1_tap_ip *tap_ip;
++	struct rv32m1_du *du_core;
++	struct target *target;
++};
++
++struct rv32m1_info {
++	struct rv32m1_jtag jtag;
++	uint8_t* reg_cache_mem;
++	char * reg_name_mem;
++};
++
++	static inline struct rv32m1_info *
++target_to_rv32m1(struct target *target)
++{
++	return (struct rv32m1_info *)target->arch_info;
++}
++
++/* RV32M1 instruction len is 2 or 4 bytes */
++static inline uint32_t rv32m1_chk_instruction_len(uint32_t instruction)
++{
++	if ((instruction & 0x3) != 0x3)
++	{
++		return 2;
++	}
++	else if ((instruction & 0x1f) != 0x1f)
++	{
++		return 4;
++	}
++
++	return 0;
++}
++
++#define NO_SINGLE_STEP     0
++#define SINGLE_STEP        1
++
++/* RV32M1 Debug registers and bits needed for resuming */
++#define RV32M1_DEBUG_CTRL_HALT   (1<<16) /* HALT. */
++#define RV32M1_DEBUG_CTRL_SSTE   (1<<0)  /* SSTE, single step enable. */
++#define RV32M1_DEBUG_IE_ECALL (1 << 11) // Environment call from M-Mode
++#define RV32M1_DEBUG_IE_SAF   (1 << 7 ) // Store Access Fault (together with LAF)
++#define RV32M1_DEBUG_IE_SAM   (1 << 6 ) // Store Address Misaligned (never traps)
++#define RV32M1_DEBUG_IE_LAF   (1 << 5 ) // Load Access Fault (together with SAF)
++#define RV32M1_DEBUG_IE_LAM   (1 << 4 ) // Load Address Misaligned (never traps)
++#define RV32M1_DEBUG_IE_BP    (1 << 3 ) // EBREAK instruction causes trap
++#define RV32M1_DEBUG_IE_ILL   (1 << 2 ) // Illegal Instruction
++#define RV32M1_DEBUG_IE_IAF   (1 << 1 ) // Instruction Access Fault (not implemented)
++#define RV32M1_DEBUG_IE_IAM   (1 << 0 ) // Instruction Address Misaligned (never traps)
++
++/* RV32M1 DEBUG cause. */
++#define RV32M1_DEBUG_CAUSE_ECALL (11) // Environment call from M-Mode
++#define RV32M1_DEBUG_CAUSE_SAF   (7 ) // Store Access Fault (together with LAF)
++#define RV32M1_DEBUG_CAUSE_SAM   (6 ) // Store Address Misaligned (never traps)
++#define RV32M1_DEBUG_CAUSE_LAF   (5 ) // Load Access Fault (together with SAF)
++#define RV32M1_DEBUG_CAUSE_LAM   (4 ) // Load Address Misaligned (never traps)
++#define RV32M1_DEBUG_CAUSE_BP    (3 ) // EBREAK instruction causes trap
++#define RV32M1_DEBUG_CAUSE_ILL   (2 ) // Illegal Instruction
++#define RV32M1_DEBUG_CAUSE_IAF   (1 ) // Instruction Access Fault (not implemented)
++#define RV32M1_DEBUG_CAUSE_IAM   (0 ) // Instruction Address Misaligned (never traps)
++
++#define RV32M1_DEBUG_CAUSE_MASK  (0x7FFFFFFFU)
++
++#define RV32M1_DEBUG_REG_ADDR(coreIdx, reg) ((uint32_t)(rv32m1_debug_unit_reg_addr[coreIdx] + \
++			offsetof(struct rv32m1_debug_unit, reg)))
++
++#endif /* OPENOCD_TARGET_RV32M1_H */
+diff --git a/src/target/rv32m1/rv32m1_du.h b/src/target/rv32m1/rv32m1_du.h
+new file mode 100644
+index 000000000..9d279c70e
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1_du.h
+@@ -0,0 +1,73 @@
++/***************************************************************************
++ *   Copyright (C) 2013 Franck Jullien                                     *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifndef OPENOCD_TARGET_RV32M1_DU_H
++#define OPENOCD_TARGET_RV32M1_DU_H
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#define CPU_STALL	0
++#define CPU_UNSTALL	1
++
++#define CPU_RESET	0
++#define CPU_NOT_RESET	1
++
++int rv32m1_du_adv_register(void);
++
++/* Linear list over all available rv32m1 debug unit */
++extern struct list_head rv32m1_du_list;
++
++struct rv32m1_du {
++	const char *name;
++	struct list_head list;
++	int options;
++
++	int (*rv32m1_jtag_init)(struct rv32m1_jtag *jtag_info);
++
++	int (*rv32m1_is_cpu_running)(struct rv32m1_jtag *jtag_info, int *running);
++
++	int (*rv32m1_cpu_stall)(struct rv32m1_jtag *jtag_info, int action);
++
++	int (*rv32m1_cpu_reset)(struct rv32m1_jtag *jtag_info, int action);
++
++	int (*rv32m1_jtag_read_cpu)(struct rv32m1_jtag *jtag_info,
++			uint32_t addr, int count, uint32_t *value);
++
++	int (*rv32m1_jtag_write_cpu)(struct rv32m1_jtag *jtag_info,
++			uint32_t addr, int count, const uint32_t *value);
++
++	int (*rv32m1_jtag_read_memory)(struct rv32m1_jtag *jtag_info, uint32_t addr, uint32_t size,
++			int count, uint8_t *buffer);
++
++	int (*rv32m1_jtag_write_memory)(struct rv32m1_jtag *jtag_info, uint32_t addr, uint32_t size,
++			int count, const uint8_t *buffer);
++};
++
++static inline struct rv32m1_du *rv32m1_jtag_to_du(struct rv32m1_jtag *jtag_info)
++{
++	return (struct rv32m1_du *)jtag_info->du_core;
++}
++
++static inline struct rv32m1_du *rv32m1_to_du(struct rv32m1_info *rv32m1)
++{
++	struct rv32m1_jtag *jtag = &rv32m1->jtag;
++	return (struct rv32m1_du *)jtag->du_core;
++}
++#endif /* OPENOCD_TARGET_RV32M1_DU_H */
+diff --git a/src/target/rv32m1/rv32m1_du_adv.c b/src/target/rv32m1/rv32m1_du_adv.c
+new file mode 100644
+index 000000000..904e288ea
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1_du_adv.c
+@@ -0,0 +1,1027 @@
++/***************************************************************************
++ *   Copyright (C) 2013-2014 by Franck Jullien                             *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *   Inspired from adv_jtag_bridge which is:                               *
++ *   Copyright (C) 2008-2010 Nathan Yawn                                   *
++ *   nyawn@opencores.net                                                   *
++ *                                                                         *
++ *   And the Mohor interface version of this file which is:                *
++ *   Copyright (C) 2011 by Julius Baxter                                   *
++ *   julius@opencores.org                                                  *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "rv32m1_tap.h"
++#include "rv32m1.h"
++#include "rv32m1_du.h"
++
++#include <target/target.h>
++#include <jtag/jtag.h>
++
++#define NO_OPTION			0
++
++/* This an option to the adv debug unit.
++ * If this is defined, status bits will be skipped on burst
++ * reads and writes to improve download speeds.
++ * This option must match the RTL configured option.
++ */
++#define ADBG_USE_HISPEED		1
++
++/* Definitions for the top-level debug unit.  This really just consists
++ * of a single register, used to select the active debug module ("chain").
++ */
++#define DBG_MODULE_SELECT_REG_SIZE	2
++#define DBG_MAX_MODULES			4
++
++#define DC_NONE				-1
++#define DC_AXI4			0
++#define DC_CPU0				1
++#define DC_CPU1				2
++#define DC_JSP				3
++
++/* CPU control register bits mask */
++#define DBG_CPU_CR_STALL		0x01
++#define DBG_CPU_CR_RESET		0x02
++
++/* Polynomial for the CRC calculation
++ * Yes, it's backwards.  Yes, this is on purpose.
++ * The hardware is designed this way to save on logic and routing,
++ * and it's really all the same to us here.
++ */
++#define ADBG_CRC_POLY			0xedb88320
++
++/* These are for the internal registers in the Wishbone module
++ * The first is the length of the index register,
++ * the indexes of the various registers are defined after that.
++ */
++#define DBG_WB_REG_SEL_LEN		2
++#define DBG_WB_REG_ERROR		0
++
++/* Opcode definitions for the Wishbone module. */
++#define DBG_WB_OPCODE_LEN		4
++#define DBG_WB_CMD_NOP			0x0
++#define DBG_WB_CMD_BWRITE8		0x1
++#define DBG_WB_CMD_BWRITE16		0x2
++#define DBG_WB_CMD_BWRITE32		0x3
++#define DBG_WB_CMD_BREAD8		0x5
++#define DBG_WB_CMD_BREAD16		0x6
++#define DBG_WB_CMD_BREAD32		0x7
++#define DBG_WB_CMD_IREG_WR		0x9
++#define DBG_WB_CMD_IREG_SEL		0xd
++
++/* Internal register definitions for the CPU0 module. */
++#define DBG_CPU0_REG_SEL_LEN		1
++#define DBG_CPU0_REG_STATUS		0
++
++/* Opcode definitions for the first CPU module. */
++#define DBG_CPU0_OPCODE_LEN		4
++#define DBG_CPU0_CMD_NOP		0x0
++#define DBG_CPU0_CMD_BWRITE32		0x3
++#define DBG_CPU0_CMD_BREAD32		0x7
++#define DBG_CPU0_CMD_IREG_WR		0x9
++#define DBG_CPU0_CMD_IREG_SEL		0xd
++
++/* Internal register definitions for the CPU1 module. */
++#define DBG_CPU1_REG_SEL_LEN		1
++#define DBG_CPU1_REG_STATUS		0
++
++/* Opcode definitions for the second CPU module. */
++#define DBG_CPU1_OPCODE_LEN		4
++#define DBG_CPU1_CMD_NOP		0x0
++#define DBG_CPU1_CMD_BWRITE32		0x3
++#define DBG_CPU1_CMD_BREAD32		0x7
++#define DBG_CPU1_CMD_IREG_WR		0x9
++#define DBG_CPU1_CMD_IREG_SEL		0xd
++
++#define MAX_READ_STATUS_WAIT		10
++#define MAX_READ_BUSY_RETRY		2
++#define MAX_READ_CRC_RETRY		2
++#define MAX_WRITE_CRC_RETRY		2
++#define BURST_READ_READY		1
++#define MAX_BUS_ERRORS			2
++
++#define MAX_BURST_SIZE			(4 * 1024)
++
++#define STATUS_BYTES			1
++#define CRC_LEN				4
++
++static struct rv32m1_du rv32m1_du_adv;
++static int rv32m1_adv_jtag_read_memory(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, uint32_t size, int count, uint8_t *buffer);
++
++static int rv32m1_adv_jtag_write_memory(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, uint32_t size, int count, const uint8_t *buffer);
++
++static int adbg_ctrl_write(struct rv32m1_jtag *jtag_info, uint8_t regidx,
++		uint32_t *cmd_data, int length_bits);
++
++static int adbg_ctrl_read(struct rv32m1_jtag *jtag_info, uint32_t regidx,
++		uint32_t *data, int length_bits);
++
++static int adbg_select_ctrl_reg(struct rv32m1_jtag *jtag_info, uint8_t regidx);
++
++static int adbg_select_module(struct rv32m1_jtag *jtag_info, int chain);
++
++static const char * const chain_name[] = {"AXI4", "CPU0", "CPU1", "JSP"};
++
++static uint32_t adbg_compute_crc(uint32_t crc, uint32_t data_in,
++		int length_bits)
++{
++	for (int i = 0; i < length_bits; i++) {
++		uint32_t d, c;
++		d = ((data_in >> i) & 0x1) ? 0xffffffff : 0;
++		c = (crc & 0x1) ? 0xffffffff : 0;
++		crc = crc >> 1;
++		crc = crc ^ ((d ^ c) & ADBG_CRC_POLY);
++	}
++
++	return crc;
++}
++
++static int find_status_bit(void *_buf, int len)
++{
++	int i = 0;
++	int count = 0;
++	int ret = -1;
++	uint8_t *buf = _buf;
++
++	while (!(buf[i] & (1 << count++)) && (i < len)) {
++		if (count == 8) {
++			count = 0;
++			i++;
++		}
++	}
++
++	if (i < len)
++		ret = (i * 8) + count;
++
++	return ret;
++}
++
++static int rv32m1_adv_jtag_init(struct rv32m1_jtag *jtag_info)
++{
++	struct rv32m1_tap_ip *tap_ip = jtag_info->tap_ip;
++
++	int retval = tap_ip->init(jtag_info);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("TAP initialization failed");
++		return retval;
++	}
++
++	/* TAP is now configured to communicate with debug interface */
++	jtag_info->rv32m1_jtag_inited = 1;
++
++	/* TAP reset - not sure what state debug module chain is in now */
++	jtag_info->rv32m1_jtag_module_selected = DC_NONE;
++
++	jtag_info->current_reg_idx = malloc(DBG_MAX_MODULES * sizeof(uint8_t));
++	memset(jtag_info->current_reg_idx, 0, DBG_MAX_MODULES * sizeof(uint8_t));
++
++	/* Set debug power up request: AXI4 module register index 2. */
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	uint32_t power_up_request[2];
++	power_up_request[0] = 0x1;
++
++	retval = adbg_ctrl_write(jtag_info, 2, power_up_request, 1);
++
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Debug power up request error");
++		return retval;
++	}
++
++	if (rv32m1_du_adv.options & ADBG_USE_HISPEED)
++		LOG_INFO("adv debug unit is configured with option ADBG_USE_HISPEED");
++
++	LOG_DEBUG("Init done");
++
++	return ERROR_OK;
++
++}
++
++/* Selects one of the modules in the debug unit
++ * (e.g. wishbone unit, CPU0, etc.)
++ */
++static int adbg_select_module(struct rv32m1_jtag *jtag_info, int chain)
++{
++	if (jtag_info->rv32m1_jtag_module_selected == chain)
++		return ERROR_OK;
++
++	/* MSB of the data out must be set to 1, indicating a module
++	 * select command
++	 */
++	uint8_t data = chain | (1 << DBG_MODULE_SELECT_REG_SIZE);
++
++	LOG_DEBUG("Select module: %s", chain_name[chain]);
++
++	struct scan_field field;
++
++	field.num_bits = (DBG_MODULE_SELECT_REG_SIZE + 1);
++	field.out_value = &data;
++	field.in_value = NULL;
++	jtag_add_dr_scan(jtag_info->tap, 1, &field, TAP_IDLE);
++
++	int retval = jtag_execute_queue();
++	if (retval != ERROR_OK)
++		return retval;
++
++	jtag_info->rv32m1_jtag_module_selected = chain;
++
++	return ERROR_OK;
++}
++
++/* Set the index of the desired register in the currently selected module
++ * 1 bit module select command
++ * 4 bits opcode
++ * n bits index
++ */
++static int adbg_select_ctrl_reg(struct rv32m1_jtag *jtag_info, uint8_t regidx)
++{
++	int index_len;
++	uint32_t opcode;
++	uint32_t opcode_len;
++
++	/* If this reg is already selected, don't do a JTAG transaction */
++	if (jtag_info->current_reg_idx[jtag_info->rv32m1_jtag_module_selected] == regidx)
++		return ERROR_OK;
++
++	switch (jtag_info->rv32m1_jtag_module_selected) {
++		case DC_AXI4:
++			index_len = DBG_WB_REG_SEL_LEN;
++			opcode = DBG_WB_CMD_IREG_SEL;
++			opcode_len = DBG_WB_OPCODE_LEN;
++			break;
++		case DC_CPU0:
++			index_len = DBG_CPU0_REG_SEL_LEN;
++			opcode = DBG_CPU0_CMD_IREG_SEL;
++			opcode_len = DBG_CPU0_OPCODE_LEN;
++			break;
++		case DC_CPU1:
++			index_len = DBG_CPU1_REG_SEL_LEN;
++			opcode = DBG_CPU1_CMD_IREG_SEL;
++			opcode_len = DBG_CPU1_OPCODE_LEN;
++			break;
++		default:
++			LOG_ERROR("Illegal debug chain selected (%i) while selecting control register",
++					jtag_info->rv32m1_jtag_module_selected);
++			return ERROR_FAIL;
++	}
++
++	/* MSB must be 0 to access modules */
++	uint32_t data = (opcode & ~(1 << opcode_len)) << index_len;
++	data |= regidx;
++
++	struct scan_field field;
++
++	field.num_bits = (opcode_len + 1) + index_len;
++	field.out_value = (uint8_t *)&data;
++	field.in_value = NULL;
++	jtag_add_dr_scan(jtag_info->tap, 1, &field, TAP_IDLE);
++
++	int retval = jtag_execute_queue();
++	if (retval != ERROR_OK)
++		return retval;
++
++	jtag_info->current_reg_idx[jtag_info->rv32m1_jtag_module_selected] = regidx;
++
++	return ERROR_OK;
++}
++
++/* Write control register (internal to the debug unit) */
++static int adbg_ctrl_write(struct rv32m1_jtag *jtag_info, uint8_t regidx,
++		uint32_t *cmd_data, int length_bits)
++{
++	int index_len;
++	uint32_t opcode;
++	uint32_t opcode_len;
++
++	LOG_DEBUG("Write control register %" PRId8 ": 0x%08" PRIx32, regidx, cmd_data[0]);
++
++	int retval = adbg_select_ctrl_reg(jtag_info, regidx);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while calling adbg_select_ctrl_reg");
++		return retval;
++	}
++
++	switch (jtag_info->rv32m1_jtag_module_selected) {
++		case DC_AXI4:
++			index_len = DBG_WB_REG_SEL_LEN;
++			opcode = DBG_WB_CMD_IREG_WR;
++			opcode_len = DBG_WB_OPCODE_LEN;
++			break;
++		case DC_CPU0:
++			index_len = DBG_CPU0_REG_SEL_LEN;
++			opcode = DBG_CPU0_CMD_IREG_WR;
++			opcode_len = DBG_CPU0_OPCODE_LEN;
++			break;
++		case DC_CPU1:
++			index_len = DBG_CPU1_REG_SEL_LEN;
++			opcode = DBG_CPU1_CMD_IREG_WR;
++			opcode_len = DBG_CPU1_OPCODE_LEN;
++			break;
++		default:
++			LOG_ERROR("Illegal debug chain selected (%i) while doing control write",
++					jtag_info->rv32m1_jtag_module_selected);
++			return ERROR_FAIL;
++	}
++
++	struct scan_field field[2];
++
++	/* MSB must be 0 to access modules */
++	uint32_t data = (opcode & ~(1 << opcode_len)) << index_len;
++	data |= regidx;
++
++	field[0].num_bits = length_bits;
++	field[0].out_value = (uint8_t *)cmd_data;
++	field[0].in_value = NULL;
++
++	field[1].num_bits = (opcode_len + 1) + index_len;
++	field[1].out_value = (uint8_t *)&data;
++	field[1].in_value = NULL;
++
++	jtag_add_dr_scan(jtag_info->tap, 2, field, TAP_IDLE);
++
++	return jtag_execute_queue();
++}
++
++/* Reads control register (internal to the debug unit) */
++static int adbg_ctrl_read(struct rv32m1_jtag *jtag_info, uint32_t regidx,
++		uint32_t *data, int length_bits)
++{
++
++	int retval = adbg_select_ctrl_reg(jtag_info, regidx);
++	if (retval != ERROR_OK) {
++		LOG_ERROR("Error while calling adbg_select_ctrl_reg");
++		return retval;
++	}
++
++	int opcode_len;
++	uint32_t opcode;
++
++	/* There is no 'read' command, We write a NOP to read */
++	switch (jtag_info->rv32m1_jtag_module_selected) {
++		case DC_AXI4:
++			opcode = DBG_WB_CMD_NOP;
++			opcode_len = DBG_WB_OPCODE_LEN;
++			break;
++		case DC_CPU0:
++			opcode = DBG_CPU0_CMD_NOP;
++			opcode_len = DBG_CPU0_OPCODE_LEN;
++			break;
++		case DC_CPU1:
++			opcode = DBG_CPU1_CMD_NOP;
++			opcode_len = DBG_CPU1_OPCODE_LEN;
++			break;
++		default:
++			LOG_ERROR("Illegal debug chain selected (%i) while doing control read",
++					jtag_info->rv32m1_jtag_module_selected);
++			return ERROR_FAIL;
++	}
++
++	/* Zero MSB = op for module, not top-level debug unit */
++	uint32_t outdata = opcode & ~(0x1 << opcode_len);
++
++	struct scan_field field[2];
++
++	field[0].num_bits = length_bits;
++	field[0].out_value = NULL;
++	field[0].in_value = (uint8_t *)data;
++
++	field[1].num_bits = opcode_len + 1;
++	field[1].out_value = (uint8_t *)&outdata;
++	field[1].in_value = NULL;
++
++	jtag_add_dr_scan(jtag_info->tap, 2, field, TAP_IDLE);
++
++	return jtag_execute_queue();
++}
++
++/* sends out a burst command to the selected module in the debug unit (MSB to LSB):
++ * 1-bit module command
++ * 4-bit opcode
++ * 32-bit address
++ * 16-bit length (of the burst, in words)
++ */
++static int adbg_burst_command(struct rv32m1_jtag *jtag_info, uint32_t opcode,
++		uint32_t address, uint16_t length_words)
++{
++	uint32_t data[2];
++
++	/* Set up the data */
++	data[0] = length_words | (address << 16);
++	/* MSB must be 0 to access modules */
++	data[1] = ((address >> 16) | ((opcode & 0xf) << 16)) & ~(0x1 << 20);
++
++	struct scan_field field;
++
++	field.num_bits = 53;
++	field.out_value = (uint8_t *)&data[0];
++	field.in_value = NULL;
++
++	jtag_add_dr_scan(jtag_info->tap, 1, &field, TAP_IDLE);
++
++	return jtag_execute_queue();
++}
++
++static int adbg_wb_burst_read(struct rv32m1_jtag *jtag_info, int size,
++		int count, uint32_t start_address, uint8_t *data)
++{
++	int retry_full_crc = 0;
++	int retry_full_busy = 0;
++	int retval;
++	uint8_t opcode;
++
++	LOG_DEBUG("Doing burst read, word size %d, word count %d, start address 0x%08" PRIx32,
++			size, count, start_address);
++
++	/* Select the appropriate opcode */
++	switch (jtag_info->rv32m1_jtag_module_selected) {
++		case DC_AXI4:
++			if (size == 1)
++				opcode = DBG_WB_CMD_BREAD8;
++			else if (size == 2)
++				opcode = DBG_WB_CMD_BREAD16;
++			else if (size == 4)
++				opcode = DBG_WB_CMD_BREAD32;
++			else {
++				LOG_WARNING("Tried burst read with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_WB_CMD_BREAD32;
++			}
++			break;
++		case DC_CPU0:
++			if (size == 4)
++				opcode = DBG_CPU0_CMD_BREAD32;
++			else {
++				LOG_WARNING("Tried burst read with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_CPU0_CMD_BREAD32;
++			}
++			break;
++		case DC_CPU1:
++			if (size == 4)
++				opcode = DBG_CPU1_CMD_BREAD32;
++			else {
++				LOG_WARNING("Tried burst read with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_CPU0_CMD_BREAD32;
++			}
++			break;
++		default:
++			LOG_ERROR("Illegal debug chain selected (%i) while doing burst read",
++					jtag_info->rv32m1_jtag_module_selected);
++			return ERROR_FAIL;
++	}
++
++	int total_size_bytes = count * size;
++	struct scan_field field;
++	uint8_t *in_buffer = malloc(total_size_bytes + CRC_LEN + STATUS_BYTES);
++
++retry_read_full:
++
++	/* Send the BURST READ command, returns TAP to idle state */
++	retval = adbg_burst_command(jtag_info, opcode, start_address, count);
++	if (retval != ERROR_OK)
++		goto out;
++
++	field.num_bits = (total_size_bytes + CRC_LEN + STATUS_BYTES) * 8;
++	field.out_value = NULL;
++	field.in_value = in_buffer;
++
++	jtag_add_dr_scan(jtag_info->tap, 1, &field, TAP_IDLE);
++
++	retval = jtag_execute_queue();
++	if (retval != ERROR_OK)
++		goto out;
++
++	/* Look for the start bit in the first (STATUS_BYTES * 8) bits */
++	int shift = find_status_bit(in_buffer, STATUS_BYTES);
++
++	/* We expect the status bit to be in the first byte */
++	if (shift < 0) {
++		if (retry_full_busy++ < MAX_READ_BUSY_RETRY) {
++			LOG_WARNING("Burst read timed out");
++			goto retry_read_full;
++		} else {
++			LOG_ERROR("Burst read failed");
++			retval = ERROR_FAIL;
++			goto out;
++		}
++	}
++
++	buffer_shr(in_buffer, total_size_bytes + CRC_LEN + STATUS_BYTES, shift);
++
++	uint32_t crc_read;
++	memcpy(data, in_buffer, total_size_bytes);
++	memcpy(&crc_read, &in_buffer[total_size_bytes], 4);
++
++	uint32_t crc_calc = 0xffffffff;
++	for (int i = 0; i < total_size_bytes; i++)
++		crc_calc = adbg_compute_crc(crc_calc, data[i], 8);
++
++	if (crc_calc != crc_read) {
++		LOG_WARNING("CRC ERROR! Computed 0x%08" PRIx32 ", read CRC 0x%08" PRIx32, crc_calc, crc_read);
++		if (retry_full_crc++ < MAX_READ_CRC_RETRY)
++			goto retry_read_full;
++		else {
++			LOG_ERROR("Burst read failed");
++			retval = ERROR_FAIL;
++			goto out;
++		}
++	} else
++		LOG_DEBUG("CRC OK!");
++
++	/* Now, read the error register, and retry/recompute as necessary */
++	if (jtag_info->rv32m1_jtag_module_selected == DC_AXI4 &&
++			!(rv32m1_du_adv.options & ADBG_USE_HISPEED)) {
++
++		uint32_t err_data[2] = {0, 0};
++		uint32_t addr;
++		int bus_error_retries = 0;
++
++		/* First, just get 1 bit...read address only if necessary */
++		retval = adbg_ctrl_read(jtag_info, DBG_WB_REG_ERROR, err_data, 1);
++		if (retval != ERROR_OK)
++			goto out;
++
++		/* Then we have a problem */
++		if (err_data[0] & 0x1) {
++
++			retval = adbg_ctrl_read(jtag_info, DBG_WB_REG_ERROR, err_data, 33);
++			if (retval != ERROR_OK)
++				goto out;
++
++			addr = (err_data[0] >> 1) | (err_data[1] << 31);
++			LOG_WARNING("WB bus error during burst read, address 0x%08" PRIx32 ", retrying!", addr);
++
++			bus_error_retries++;
++			if (bus_error_retries > MAX_BUS_ERRORS) {
++				LOG_ERROR("Max WB bus errors reached during burst read");
++				retval = ERROR_FAIL;
++				goto out;
++			}
++
++			/* Don't call retry_do(), a JTAG reset won't help a WB bus error */
++			/* Write 1 bit, to reset the error register */
++			err_data[0] = 1;
++			retval = adbg_ctrl_write(jtag_info, DBG_WB_REG_ERROR, err_data, 1);
++			if (retval != ERROR_OK)
++				goto out;
++
++			goto retry_read_full;
++		}
++	}
++
++out:
++	free(in_buffer);
++
++	return retval;
++}
++
++/* Set up and execute a burst write to a contiguous set of addresses */
++static int adbg_wb_burst_write(struct rv32m1_jtag *jtag_info, const uint8_t *data, int size,
++		int count, unsigned long start_address)
++{
++	int retry_full_crc = 0;
++	int retval;
++	uint8_t opcode;
++
++	LOG_DEBUG("Doing burst write, word size %d, word count %d,"
++			"start address 0x%08lx", size, count, start_address);
++
++	/* Select the appropriate opcode */
++	switch (jtag_info->rv32m1_jtag_module_selected) {
++		case DC_AXI4:
++			if (size == 1)
++				opcode = DBG_WB_CMD_BWRITE8;
++			else if (size == 2)
++				opcode = DBG_WB_CMD_BWRITE16;
++			else if (size == 4)
++				opcode = DBG_WB_CMD_BWRITE32;
++			else {
++				LOG_DEBUG("Tried WB burst write with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_WB_CMD_BWRITE32;
++			}
++			break;
++		case DC_CPU0:
++			if (size == 4)
++				opcode = DBG_CPU0_CMD_BWRITE32;
++			else {
++				LOG_DEBUG("Tried CPU0 burst write with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_CPU0_CMD_BWRITE32;
++			}
++			break;
++		case DC_CPU1:
++			if (size == 4)
++				opcode = DBG_CPU1_CMD_BWRITE32;
++			else {
++				LOG_DEBUG("Tried CPU1 burst write with invalid word size (%d),"
++						"defaulting to 4-byte words", size);
++				opcode = DBG_CPU0_CMD_BWRITE32;
++			}
++			break;
++		default:
++			LOG_ERROR("Illegal debug chain selected (%i) while doing burst write",
++					jtag_info->rv32m1_jtag_module_selected);
++			return ERROR_FAIL;
++	}
++
++retry_full_write:
++
++	/* Send the BURST WRITE command, returns TAP to idle state */
++	retval = adbg_burst_command(jtag_info, opcode, start_address, count);
++	if (retval != ERROR_OK)
++		return retval;
++
++	struct scan_field field[3];
++
++	/* Write a start bit so it knows when to start counting */
++	uint8_t value = 1;
++	field[0].num_bits = 1;
++	field[0].out_value = &value;
++	field[0].in_value = NULL;
++
++	uint32_t crc_calc = 0xffffffff;
++	for (int i = 0; i < (count * size); i++)
++		crc_calc = adbg_compute_crc(crc_calc, data[i], 8);
++
++	field[1].num_bits = count * size * 8;
++	field[1].out_value = data;
++	field[1].in_value = NULL;
++
++	field[2].num_bits = 32;
++	field[2].out_value = (uint8_t *)&crc_calc;
++	field[2].in_value = NULL;
++
++	jtag_add_dr_scan(jtag_info->tap, 3, field, TAP_DRSHIFT);
++
++	/* Read the 'CRC match' bit, and go to idle */
++	field[0].num_bits = 1;
++	field[0].out_value = NULL;
++	field[0].in_value = &value;
++	jtag_add_dr_scan(jtag_info->tap, 1, field, TAP_IDLE);
++
++	retval = jtag_execute_queue();
++	if (retval != ERROR_OK)
++		return retval;
++
++	if (!value) {
++		LOG_WARNING("CRC ERROR! match bit after write is %" PRIi8 " (computed CRC 0x%08" PRIx32 ")", value, crc_calc);
++		if (retry_full_crc++ < MAX_WRITE_CRC_RETRY)
++			goto retry_full_write;
++		else
++			return ERROR_FAIL;
++	} else
++		LOG_DEBUG("CRC OK!\n");
++
++	/* Now, read the error register, and retry/recompute as necessary */
++	if (jtag_info->rv32m1_jtag_module_selected == DC_AXI4 &&
++			!(rv32m1_du_adv.options & ADBG_USE_HISPEED)) {
++		uint32_t addr;
++		int bus_error_retries = 0;
++		uint32_t err_data[2] = {0, 0};
++
++		/* First, just get 1 bit...read address only if necessary */
++		retval = adbg_ctrl_read(jtag_info, DBG_WB_REG_ERROR, err_data, 1);
++		if (retval != ERROR_OK)
++			return retval;
++
++		/* Then we have a problem */
++		if (err_data[0] & 0x1) {
++
++			retval = adbg_ctrl_read(jtag_info, DBG_WB_REG_ERROR, err_data, 33);
++			if (retval != ERROR_OK)
++				return retval;
++
++			addr = (err_data[0] >> 1) | (err_data[1] << 31);
++			LOG_WARNING("WB bus error during burst write, address 0x%08" PRIx32 ", retrying!", addr);
++
++			bus_error_retries++;
++			if (bus_error_retries > MAX_BUS_ERRORS) {
++				LOG_ERROR("Max WB bus errors reached during burst read");
++				retval = ERROR_FAIL;
++				return retval;
++			}
++
++			/* Don't call retry_do(), a JTAG reset won't help a WB bus error */
++			/* Write 1 bit, to reset the error register */
++			err_data[0] = 1;
++			retval = adbg_ctrl_write(jtag_info, DBG_WB_REG_ERROR, err_data, 1);
++			if (retval != ERROR_OK)
++				return retval;
++
++			goto retry_full_write;
++		}
++	}
++
++	return ERROR_OK;
++}
++
++/* Currently hard set in functions to 32-bits */
++static int rv32m1_adv_jtag_read_cpu(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, int count, uint32_t *value)
++{
++	int retval;
++	if (!jtag_info->rv32m1_jtag_inited) {
++		retval = rv32m1_adv_jtag_init(jtag_info);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	return adbg_wb_burst_read(jtag_info, 4, count, addr, (uint8_t *)value);
++}
++
++static int rv32m1_adv_jtag_write_cpu(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, int count, const uint32_t *value)
++{
++	int retval;
++	if (!jtag_info->rv32m1_jtag_inited) {
++		retval = rv32m1_adv_jtag_init(jtag_info);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	return adbg_wb_burst_write(jtag_info, (uint8_t *)value, 4, count, addr);
++}
++
++static int rv32m1_adv_cpu_stall(struct rv32m1_jtag *jtag_info, int action)
++{
++	int retval;
++	if (!jtag_info->rv32m1_jtag_inited) {
++		retval = rv32m1_adv_jtag_init(jtag_info);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	uint32_t reg;
++
++	retval = rv32m1_adv_jtag_read_memory(jtag_info, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CTRL), 4, 1, (uint8_t*)&reg);
++
++	if (retval != ERROR_OK)
++		return retval;
++
++	if (action == CPU_STALL)
++		reg |= RV32M1_DEBUG_CTRL_HALT;
++	else
++		reg &= ~RV32M1_DEBUG_CTRL_HALT;
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	return rv32m1_adv_jtag_write_memory(jtag_info, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CTRL), 4, 1, (uint8_t *)&reg);
++}
++
++static int rv32m1_adv_is_cpu_running(struct rv32m1_jtag *jtag_info, int *running)
++{
++	uint32_t reg;
++	int retval;
++
++#if 1
++	/* Check MDM to see whether system is in reset. */
++	retval = rv32m1_adv_jtag_read_memory(jtag_info, 0xf9010000, 4, 1, (uint8_t *)&reg);
++
++	if (retval != ERROR_OK)
++		return retval;
++
++	if ((reg & (1<<3)) == 0)
++	{
++		*running = 0;
++		return ERROR_OK;
++	}
++#endif
++
++	retval = rv32m1_adv_jtag_read_memory(jtag_info, RV32M1_DEBUG_REG_ADDR(coreIdx, DBG_CTRL), 4, 1, (uint8_t *)&reg);
++
++	if (retval != ERROR_OK)
++		return retval;
++
++	if (reg & RV32M1_DEBUG_CTRL_HALT)
++		*running = 0;
++	else
++		*running = 1;
++
++	return ERROR_OK;
++}
++
++static int rv32m1_adv_cpu_reset(struct rv32m1_jtag *jtag_info, int action)
++{
++	/* Set EVENT unit base + 0x80 bit 31 to reset. */
++	int retval = ERROR_OK;
++	uint32_t reset_requst = 1<<31;
++
++	if (action == CPU_RESET)
++	{
++		retval = rv32m1_adv_jtag_write_memory(jtag_info,
++				rv32m1_event_unit_reg_addr[coreIdx] + 0x80,
++				4,
++				1,
++				(const uint8_t*)&reset_requst);
++	}
++
++	return retval;
++}
++
++static int rv32m1_adv_jtag_read_memory(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, uint32_t size, int count, uint8_t *buffer)
++{
++	LOG_DEBUG("Reading WB%" PRId32 " at 0x%08" PRIx32, size * 8, addr);
++
++	struct jtag_tap *tap = jtag_info->tap;
++	struct scan_field field;
++	uint8_t ir_value = 8;
++
++	field.num_bits = tap->ir_length;
++	field.out_value = &ir_value;
++	field.in_value = NULL;
++
++	jtag_add_ir_scan(tap, &field, TAP_IDLE);
++
++	jtag_execute_queue();
++
++	int retval;
++	if (!jtag_info->rv32m1_jtag_inited) {
++		retval = rv32m1_adv_jtag_init(jtag_info);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	int block_count_left = count;
++	uint32_t block_count_address = addr;
++	uint8_t *block_count_buffer = buffer;
++
++	while (block_count_left) {
++
++		int blocks_this_round = (block_count_left > MAX_BURST_SIZE) ?
++			MAX_BURST_SIZE : block_count_left;
++
++		retval = adbg_wb_burst_read(jtag_info, size, blocks_this_round,
++				block_count_address, block_count_buffer);
++		if (retval != ERROR_OK)
++			return retval;
++
++		block_count_left -= blocks_this_round;
++		block_count_address += size * MAX_BURST_SIZE;
++		block_count_buffer += size * MAX_BURST_SIZE;
++	}
++
++	/* The adv_debug_if always return words and half words in
++	 * little-endian order no matter what the target endian is.
++	 * So if the target endian is big, change the order.
++	 */
++
++	struct target *target = jtag_info->target;
++	if ((target->endianness == TARGET_BIG_ENDIAN) && (size != 1)) {
++		switch (size) {
++			case 4:
++				buf_bswap32(buffer, buffer, size * count);
++				break;
++			case 2:
++				buf_bswap16(buffer, buffer, size * count);
++				break;
++		}
++	}
++
++	return ERROR_OK;
++}
++
++static int rv32m1_adv_jtag_write_memory(struct rv32m1_jtag *jtag_info,
++		uint32_t addr, uint32_t size, int count, const uint8_t *buffer)
++{
++	LOG_DEBUG("Writing WB%" PRId32 " at 0x%08" PRIx32, size * 8, addr);
++
++	struct jtag_tap *tap = jtag_info->tap;
++	struct scan_field field;
++	uint8_t ir_value = 8;
++
++	field.num_bits = tap->ir_length;
++	field.out_value = &ir_value;
++	field.in_value = NULL;
++
++	jtag_add_ir_scan(tap, &field, TAP_IDLE);
++
++	jtag_execute_queue();
++
++	int retval;
++	if (!jtag_info->rv32m1_jtag_inited) {
++		retval = rv32m1_adv_jtag_init(jtag_info);
++		if (retval != ERROR_OK)
++			return retval;
++	}
++
++	retval = adbg_select_module(jtag_info, DC_AXI4);
++	if (retval != ERROR_OK)
++		return retval;
++
++	/* The adv_debug_if wants words and half words in little-endian
++	 * order no matter what the target endian is. So if the target
++	 * endian is big, change the order.
++	 */
++
++	void *t = NULL;
++	struct target *target = jtag_info->target;
++	if ((target->endianness == TARGET_BIG_ENDIAN) && (size != 1)) {
++		t = malloc(count * size * sizeof(uint8_t));
++		if (t == NULL) {
++			LOG_ERROR("Out of memory");
++			return ERROR_FAIL;
++		}
++
++		switch (size) {
++			case 4:
++				buf_bswap32(t, buffer, size * count);
++				break;
++			case 2:
++				buf_bswap16(t, buffer, size * count);
++				break;
++		}
++		buffer = t;
++	}
++
++	int block_count_left = count;
++	uint32_t block_count_address = addr;
++	uint8_t *block_count_buffer = (uint8_t *)buffer;
++
++	while (block_count_left) {
++
++		int blocks_this_round = (block_count_left > MAX_BURST_SIZE) ?
++			MAX_BURST_SIZE : block_count_left;
++
++		retval = adbg_wb_burst_write(jtag_info, block_count_buffer,
++				size, blocks_this_round,
++				block_count_address);
++		if (retval != ERROR_OK) {
++			if (t != NULL)
++				free(t);
++			return retval;
++		}
++
++		block_count_left -= blocks_this_round;
++		block_count_address += size * MAX_BURST_SIZE;
++		block_count_buffer += size * MAX_BURST_SIZE;
++	}
++
++	if (t != NULL)
++		free(t);
++
++	return ERROR_OK;
++}
++
++static struct rv32m1_du rv32m1_du_adv = {
++	.name                     = "adv",
++	.options                  = NO_OPTION,
++	.rv32m1_jtag_init           = rv32m1_adv_jtag_init,
++
++	.rv32m1_is_cpu_running      = rv32m1_adv_is_cpu_running,
++	.rv32m1_cpu_stall           = rv32m1_adv_cpu_stall,
++	.rv32m1_cpu_reset           = rv32m1_adv_cpu_reset,
++
++	.rv32m1_jtag_read_cpu       = rv32m1_adv_jtag_read_cpu,
++	.rv32m1_jtag_write_cpu      = rv32m1_adv_jtag_write_cpu,
++
++	.rv32m1_jtag_read_memory    = rv32m1_adv_jtag_read_memory,
++	.rv32m1_jtag_write_memory   = rv32m1_adv_jtag_write_memory
++};
++
++int rv32m1_du_adv_register(void)
++{
++	list_add_tail(&rv32m1_du_adv.list, &rv32m1_du_list);
++	return 0;
++}
+diff --git a/src/target/rv32m1/rv32m1_tap.h b/src/target/rv32m1/rv32m1_tap.h
+new file mode 100644
+index 000000000..04ab1daa4
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1_tap.h
+@@ -0,0 +1,40 @@
++/***************************************************************************
++ *   Copyright (C) 2012 by Franck Jullien                                  *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifndef OPENOCD_TARGET_RV32M1_TAP_H
++#define OPENOCD_TARGET_RV32M1_TAP_H
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include <helper/list.h>
++#include "rv32m1.h"
++
++int rv32m1_tap_mohor_register(void);
++
++/* Linear list over all available rv32m1 taps */
++extern struct list_head rv32m1_tap_list;
++
++struct rv32m1_tap_ip {
++	struct list_head list;
++	int (*init)(struct rv32m1_jtag *jtag_info);
++	const char *name;
++};
++
++#endif /* OPENOCD_TARGET_RV32M1_TAP_H */
+diff --git a/src/target/rv32m1/rv32m1_tap_mohor.c b/src/target/rv32m1/rv32m1_tap_mohor.c
+new file mode 100644
+index 000000000..d645257ce
+--- /dev/null
++++ b/src/target/rv32m1/rv32m1_tap_mohor.c
+@@ -0,0 +1,63 @@
++/***************************************************************************
++ *   Copyright (C) 2013 by Franck Jullien                                  *
++ *   elec4fun@gmail.com                                                    *
++ *                                                                         *
++ *   This program is free software; you can redistribute it and/or modify  *
++ *   it under the terms of the GNU General Public License as published by  *
++ *   the Free Software Foundation; either version 2 of the License, or     *
++ *   (at your option) any later version.                                   *
++ *                                                                         *
++ *   This program is distributed in the hope that it will be useful,       *
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
++ *   GNU General Public License for more details.                          *
++ *                                                                         *
++ *   You should have received a copy of the GNU General Public License     *
++ *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
++ ***************************************************************************/
++
++#ifdef HAVE_CONFIG_H
++#include "config.h"
++#endif
++
++#include "rv32m1_tap.h"
++#include "rv32m1.h"
++
++#include <jtag/jtag.h>
++
++#define RV32M1_TAP_INST_DEBUG	0x8
++
++static int rv32m1_tap_mohor_init(struct rv32m1_jtag *jtag_info)
++{
++	LOG_DEBUG("Initialising OpenCores JTAG TAP");
++
++	/* Put TAP into state where it can talk to the debug interface
++	 * by shifting in correct value to IR.
++	 */
++
++	/* Ensure TAP is reset - maybe not necessary*/
++	jtag_add_tlr();
++
++	struct jtag_tap *tap = jtag_info->tap;
++	struct scan_field field;
++	uint8_t ir_value = RV32M1_TAP_INST_DEBUG;
++
++	field.num_bits = tap->ir_length;
++	field.out_value = &ir_value;
++	field.in_value = NULL;
++
++	jtag_add_ir_scan(tap, &field, TAP_IDLE);
++
++	return jtag_execute_queue();
++}
++
++static struct rv32m1_tap_ip mohor_tap = {
++	.name = "mohor",
++	.init = rv32m1_tap_mohor_init,
++};
++
++int rv32m1_tap_mohor_register(void)
++{
++	list_add_tail(&mohor_tap.list, &rv32m1_tap_list);
++	return 0;
++}
+diff --git a/src/target/target.c b/src/target/target.c
+index e3a6f955e..a1337bc97 100644
+--- a/src/target/target.c
++++ b/src/target/target.c
+@@ -103,6 +103,7 @@ extern struct target_type quark_x10xx_target;
+ extern struct target_type quark_d20xx_target;
+ extern struct target_type stm8_target;
+ extern struct target_type riscv_target;
++extern struct target_type rv32m1_target;
+ extern struct target_type mem_ap_target;
+ extern struct target_type esirisc_target;
+ extern struct target_type arcv2_target;
+@@ -143,6 +144,7 @@ static struct target_type *target_types[] = {
+ 	&quark_d20xx_target,
+ 	&stm8_target,
+ 	&riscv_target,
++	&rv32m1_target,
+ 	&mem_ap_target,
+ 	&esirisc_target,
+ 	&arcv2_target,
+diff --git a/tcl/target/rv32m1_ri5cy.cfg b/tcl/target/rv32m1_ri5cy.cfg
+new file mode 100644
+index 000000000..05ce1bd58
+--- /dev/null
++++ b/tcl/target/rv32m1_ri5cy.cfg
+@@ -0,0 +1,150 @@
++set _WORKAREASIZE 0x2000
++
++adapter_khz 1000
++
++interface jlink
++transport select jtag
++
++set _WORKAREASIZE 0x1000
++
++set _CHIPNAME rv32m1
++
++reset_config srst_only
++
++# OpenCores Mohor JTAG TAP ID
++set _CPUTAPID  0x249511C3
++
++jtag newtap $_CHIPNAME cpu -irlen 4 -expected-id $_CPUTAPID
++
++set _TARGETNAME $_CHIPNAME.cpu
++target create $_TARGETNAME rv32m1 -endian little -chain-position $_TARGETNAME
++
++# Select the TAP core we are using
++tap_select mohor
++
++# Select the debug unit core we are using. This debug unit as an option.
++
++set ADBG_USE_HISPEED		1
++
++# If ADBG_USE_HISPEED is set (options bit 1), status bits will be skipped
++# on burst reads and writes to improve download speeds.
++# This option must match the RTL configured option.
++
++du_select adv [expr $ADBG_USE_HISPEED]
++
++# Select core 0
++core_select 0
++
++$_TARGETNAME configure -work-area-phys 0x20000000 -work-area-size $_WORKAREASIZE -work-area-backup 0
++$_TARGETNAME configure -event gdb-detach {
++    resume
++}
++set _FLASHNAME $_CHIPNAME.flash
++flash bank $_CHIPNAME.flash0 rv32m1 0 0 0 0 $_TARGETNAME # For core 0
++flash bank $_CHIPNAME.flash1 rv32m1 0x01000000 0 0 0 $_TARGETNAME # For core 1
++
++proc ri5cy_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFF03FF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc cm4_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFFFFF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc zero_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFF03BF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc cm0_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFFFBF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++# All cores are available, CM4 & RI5CY boot first
++proc core0_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFA3FF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++# All cores are available, CM0 & ZERO_RISCY boot first
++proc core1_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFA3BF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++init
+diff --git a/tcl/target/rv32m1_zero_riscy.cfg b/tcl/target/rv32m1_zero_riscy.cfg
+new file mode 100644
+index 000000000..efd0df9f3
+--- /dev/null
++++ b/tcl/target/rv32m1_zero_riscy.cfg
+@@ -0,0 +1,114 @@
++set _WORKAREASIZE 0x2000
++
++adapter_khz 1000
++
++interface jlink
++transport select jtag
++
++set _WORKAREASIZE 0x1000
++
++set _CHIPNAME rv32m1
++
++reset_config srst_only
++
++# OpenCores Mohor JTAG TAP ID
++set _CPUTAPID  0x249511C3
++
++jtag newtap $_CHIPNAME cpu -irlen 4 -expected-id $_CPUTAPID
++
++set _TARGETNAME $_CHIPNAME.cpu
++target create $_TARGETNAME rv32m1 -endian little -chain-position $_TARGETNAME
++
++# Select the TAP core we are using
++tap_select mohor
++
++# Select the debug unit core we are using. This debug unit as an option.
++
++set ADBG_USE_HISPEED		1
++
++# If ADBG_USE_HISPEED is set (options bit 1), status bits will be skipped
++# on burst reads and writes to improve download speeds.
++# This option must match the RTL configured option.
++
++du_select adv [expr $ADBG_USE_HISPEED]
++
++# Select core 1
++core_select 1
++
++$_TARGETNAME configure -work-area-phys 0x20000000 -work-area-size $_WORKAREASIZE -work-area-backup 0
++$_TARGETNAME configure -event gdb-detach {
++    resume
++}
++set _FLASHNAME $_CHIPNAME.flash
++flash bank $_CHIPNAME.flash0 rv32m1 0 0 0 0 $_TARGETNAME # For core 0
++flash bank $_CHIPNAME.flash1 rv32m1 0x01000000 0 0 0 $_TARGETNAME # For core 1
++
++proc ri5cy_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFF03FF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc cm4_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFFFFF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc zero_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFF03BF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++proc cm0_boot { } {
++
++    # Erase all blok unsecure
++    mwb 0x40023000 0x70
++    mww 0x40023004 0x49000000
++    mwb 0x40023000 0x80
++
++    sleep 1000
++
++    mwb 0x40023000 0x70
++    mww 0x40023008 0xFFFFFFBF
++    mww 0x40023004 0x43840000
++    mwb 0x40023000 0x80
++
++    sleep 2
++}
++
++init
+-- 
+2.40.1
+
