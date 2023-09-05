@@ -21,7 +21,6 @@ in pkgs.gccMultiStdenv.mkDerivation {
     dtc
     wget
     gcc11
-    SDL2
     xz
     file
     # net-tools support

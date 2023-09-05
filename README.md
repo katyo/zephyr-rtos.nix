@@ -12,3 +12,7 @@ I using this config for a year.
 
 You can select required toolchains and add extra dependencies
 by creating custom derived `shell.nix` (see `shell-*.nix`).
+
+## SDL
+
+Add `SDL2` to `inputs` if you need emulated graphic devices.
