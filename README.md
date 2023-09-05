@@ -11,4 +11,4 @@ I using this config for a year.
 ## Config
 
 You can select required toolchains and add extra dependencies
-by creating custom derived `shell.nix` (see `example-shell.nix`).
+by creating custom derived `shell.nix` (see `shell-*.nix`).

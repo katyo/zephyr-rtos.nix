@@ -7,5 +7,6 @@ shell {
   inputs = with pkgs; [
     uncrustify_0_72
     renode
+    linuxKernel.packages.linux_6_1.usbip
   ];
 }
