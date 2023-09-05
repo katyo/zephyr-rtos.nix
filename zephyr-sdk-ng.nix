@@ -31,6 +31,11 @@ in stdenv.mkDerivation {
     mv ${lib.concatStringsSep " " install-toolchains} $sourceRoot
   '';
 
+  dontAutoPatchelf = true;
+  postFixup = ''
+    autoPatchelf $(find $out/zephyr-sdk -mindepth 1 -maxdepth 1 -type d -not -name sysroots)
+  '';
+
   configurePhase = "true";
   buildPhase = "true";
   installPhase = ''
