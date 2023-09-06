@@ -32,6 +32,7 @@ in pkgs.gccMultiStdenv.mkDerivation {
     pahole
     openocd-svd
     hidrd
+    autoPatchelfHook
   ] ++ (with pkgs.python3Packages; [
     anytree
     pyelftools
@@ -59,6 +60,7 @@ in pkgs.gccMultiStdenv.mkDerivation {
       source .venv/bin/activate
       pip install -r zephyr/scripts/requirements.txt
       pip install git+https://github.com/HBehrens/puncover
+      autoPatchelf .venv
     fi
     source <(west completion bash)
     echo
