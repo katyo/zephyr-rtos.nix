@@ -10,9 +10,7 @@
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; overlays = [ self.overlays.default ]; });
     in
     {
-      overlays = {
-        default = import ./overlay;
-      };
+      overlays.default = import ./overlay;
 
       packages = forAllSystems (system: import ./pkgs { pkgs = nixpkgsFor.${system}; });
 
