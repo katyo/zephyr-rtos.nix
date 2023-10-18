@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+tmp=$(mktemp -d)
+cd $tmp
+
+requirements=(
+    https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/v3.5-branch/scripts/requirements-base.txt
+    https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/v3.5-branch/scripts/requirements-build-test.txt
+    https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/v3.5-branch/scripts/requirements-run-test.txt
+    https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/v3.5-branch/scripts/requirements-extras.txt
+    https://raw.githubusercontent.com/zephyrproject-rtos/zephyr/v3.5-branch/scripts/requirements-compliance.txt
+)
+for url in "${requirements[@]}"; do
+    wget -q $url
+done
+
+egrep -v '^$|#' <(sed -e 's,\(.*sys_platform == "win32"\),#\1,g' \
+                      -e 's,>=.*,,g' requirements-*.txt) \
+    | sed -e 's,Pillow,pillow,g' \
+          -e 's,PyYAML,pyyaml,g' \
+          -e 's,lpc_checksum,lpc-checksum,g' \
+    | grep -v 'clang-format' \
+    | grep -v 'gitlint' \
+    | sort -u
+
+rm -rf $tmp
