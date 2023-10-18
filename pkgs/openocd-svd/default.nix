@@ -1,4 +1,4 @@
-{ fetchFromGitHub, python3, qt5 }:
+{ fetchFromGitHub, python3, qt5, unstableGitUpdater }:
 python3.pkgs.buildPythonApplication rec {
   pname = "openocd-svd";
   git-rev = "28bfab1";
@@ -13,6 +13,8 @@ python3.pkgs.buildPythonApplication rec {
   };
 
   format = "other";
+
+  passthru.updateScript = unstableGitUpdater { };
 
   nativeBuildInputs = with qt5; [ wrapQtAppsHook ];
   propagatedBuildInputs = with python3.pkgs; [ setuptools cmsis-svd pyqt5 ];
