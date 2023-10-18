@@ -1,6 +1,7 @@
 { stdenv
 , lib
 , fetchurl
+, autoreconfHook
 , pkg-config
 , hidapi
 , jimtcl
@@ -13,7 +14,11 @@
 # Allow selection the hardware targets (SBCs, JTAG Programmers, JTAG Adapters)
 , extraHardwareSupport ? []
 }:
-
+let
+  isPatchFile = name: value: value == "regular" && (lib.hasSuffix ".patch" name);
+  filesFromDir = filt: path: map (name: path + "/${name}")
+    (lib.naturalSort (lib.attrNames (lib.filterAttrs filt (builtins.readDir path))));
+in
 stdenv.mkDerivation rec {
   pname = "openocd";
   version = "0.12.0";
@@ -22,7 +27,10 @@ stdenv.mkDerivation rec {
     sha256 = "sha256-ryVHiL6Yhh8r2RA/5uYKd07Jaow3R0Tu+Rl/YEMHWvo=";
   };
 
-  nativeBuildInputs = [ pkg-config ];
+  # Patches from https://github.com/zephyrproject-rtos/openocd
+  patches = filesFromDir isPatchFile ./.;
+
+  nativeBuildInputs = [ pkg-config autoreconfHook ];
 
   buildInputs = [ hidapi jimtcl libftdi1 libjaylink libusb1 ]
     ++ lib.optional stdenv.isLinux libgpiod;
