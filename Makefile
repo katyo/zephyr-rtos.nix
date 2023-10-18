@@ -146,4 +146,4 @@ post_process = $(subst $(newline),\n,$(call trim_trailing_spaces,$(1)))
 .PHONY: zephyr-sdk-hash.nix
 gen-hash-map: zephyr-sdk-hash.nix
 zephyr-sdk-hash.nix: fetch-hash
-	@printf "$(call post_process,$(call gen_info))" > $@
+	@printf "$(call post_process,$(call gen_info))" > pkgs/zephyr-sdk-ng/zephyr-sdk-hash.nix

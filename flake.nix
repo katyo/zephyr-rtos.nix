@@ -11,24 +11,13 @@
     in
     {
       overlays = {
-        default = final: prev: {
-          mkZephyrSdk =
-            { toolchains ? "all"
-            , inputs ? [ ]
-            }:
-            import ./shell.nix {
-              inherit toolchains inputs;
-              pkgs = (import ./packages.nix { pkgs = prev; });
-            };
-        };
+        default = import ./overlay;
       };
 
-      devShells = forAllSystems (system:
-        let
-          pkgs = nixpkgsFor.${system};
-        in
-        {
-          default = pkgs.mkZephyrSdk { };
-        });
+      packages = forAllSystems (system: import ./pkgs { pkgs = nixpkgsFor.${system}; });
+
+      devShells = forAllSystems (system: {
+        default = nixpkgsFor.${system}.mkZephyrSdk { };
+      });
     };
 }

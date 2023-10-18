@@ -1,13 +1,19 @@
-{ pkgs ? import ./packages.nix {}, inputs ? [], toolchains ? "all", ... }:
+{ pkgs }:
 
-let zephyr-sdk = pkgs.zephyr-sdk.override {
-      inherit toolchains;
-    };
+{ name ? "zephyr-rtos-env"
+, inputs ? [ ]
+, toolchains ? "all"
+}:
+let
+  zephyr-sdk = pkgs.zephyr-sdk.override {
+    inherit toolchains;
+  };
+in
 
-in pkgs.gccMultiStdenv.mkDerivation {
-  name = "zephyr-rtos-env";
+pkgs.gccMultiStdenv.mkDerivation ({
+  inherit name;
 
-  phases = [];
+  phases = [ ];
 
   buildInputs = with pkgs; [
     git
@@ -75,4 +81,4 @@ in pkgs.gccMultiStdenv.mkDerivation {
     echo '  west build -p auto -b qemu_x86 zephyr/samples/hello_world'
     echo '  west build -t run'
   '';
-}
+})
