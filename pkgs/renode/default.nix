@@ -1,11 +1,11 @@
 { stdenv, fetchurl, mono, gtk-sharp-2_0, screen, autoPatchelfHook, nix-update-script }:
 stdenv.mkDerivation rec {
   pname = "renode";
-  version = "1.14.0";
+  version = "1.14.0+20231018gite86ec009";
 
   src = fetchurl {
-    url = "https://github.com/${pname}/${pname}/releases/download/v${version}/${pname}-${version}.linux-portable.tar.gz";
-    hash = "sha256-1wfVHtCYc99ACz8m2XEg1R0nIDh9xP4ffV/vxeeEHxE=";
+    url = "https://builds.renode.io/${pname}-${version}.linux-portable.tar.gz";
+    hash = "sha256-Tuc5C2mE10DseWvjkd3Xs+8GK+28oRR5/TxTuXGz62E=";
   };
 
   passthru = {
