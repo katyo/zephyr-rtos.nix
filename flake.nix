@@ -12,6 +12,18 @@
     {
       overlays.default = import ./overlay;
 
+      templates = {
+        all-toolchains = {
+          path = ./templates/all-toolchains;
+          description = "Zephyr Project template, using all supported toolchains";
+        };
+
+        arm = {
+          path = ./templates/arm;
+          description = "Zephyr Project template, using arm toolchain";
+        };
+      };
+
       packages = forAllSystems (system: import ./pkgs { pkgs = nixpkgsFor.${system}; });
 
       devShells = forAllSystems (system: {
