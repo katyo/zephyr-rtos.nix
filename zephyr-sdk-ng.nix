@@ -7,7 +7,10 @@ let pname = "zephyr-sdk";
     host = "${lib.elemAt system 1}-${lib.elemAt system 0}";
     base-url = "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${version}/";
     hashes = (import ./zephyr-sdk-hash.nix).${version}.${host};
-    install-toolchains = if toolchains == "all" then builtins.attrNames hashes.toolchains else toolchains;
+    install-toolchains = if toolchains == "all"
+      then builtins.trace "All toolchains will be installed. This may take a long..."
+             (builtins.attrNames hashes.toolchains)
+      else toolchains;
 
 in stdenv.mkDerivation {
   inherit pname version;
