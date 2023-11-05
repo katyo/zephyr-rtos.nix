@@ -52,7 +52,7 @@ in stdenv.mkDerivation {
     patchShebangs --host $out/zephyr-sdk
     (cd $out/zephyr-sdk && ./setup.sh -h ${lib.concatMapStringsSep " " (toolchain: "-t ${toolchain}") install-toolchains})
     #find -maxdepth 1 -! -name '*.sh' -exec cp -r {} $out/zephyr-sdk \;
-  '' + (if overrideOpenocd == null then "" else ''
+  '' + (lib.optionalString (overrideOpenocd != null) ''
     rm -f $out/zephyr-sdk/sysroots/x86_64-pokysdk-linux/usr/bin/openocd
     ln -s ${overrideOpenocd}/bin/openocd \
        $out/zephyr-sdk/sysroots/x86_64-pokysdk-linux/usr/bin/openocd
