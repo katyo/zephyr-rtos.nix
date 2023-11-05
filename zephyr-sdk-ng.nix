@@ -1,4 +1,4 @@
-{ stdenv, lib, hostPlatform, fetchurl, autoPatchelfHook, xz, python38, which
+{ stdenv, lib, hostPlatform, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python38, which
 , hidapi, libftdi1, libusb1, overrideOpenocd, cmake, wget, file
 , version ? "0.16.3", toolchains ? "all" }:
 
@@ -24,7 +24,7 @@ in stdenv.mkDerivation {
 
   sourceRoot = "${pname}-${version}";
 
-  nativeBuildInputs = [ autoPatchelfHook which file cmake wget ];
+  nativeBuildInputs = [ autoPatchelfHook makeBinaryWrapper which file cmake wget ];
   buildInputs = [ xz python38 hidapi libftdi1 libusb1 ];
 
   postUnpack = ''
@@ -34,6 +34,14 @@ in stdenv.mkDerivation {
   dontAutoPatchelf = true;
   postFixup = ''
     autoPatchelf $(find $out/zephyr-sdk -mindepth 1 -maxdepth 1 -type d -not -name sysroots)
+
+    find $out -type f -perm -a+x -name '*-py' | while read prog; do
+      echo "Wrap python program: $prog"
+      wrapProgram $prog \
+        --set NIX_PYTHONPREFIX ${python38} \
+        --set NIX_PYTHONEXECUTABLE ${python38}/bin/python3.8 \
+        --set NIX_PYTHONPATH ${python38}/lib/python3.8/site-packages
+    done
   '';
 
   configurePhase = "true";
