@@ -3,6 +3,7 @@
 { name ? "zephyr-rtos-env"
 , inputs ? [ ]
 , toolchains ? "all"
+, shellHook ? null
 }:
 let
   zephyr-sdk = pkgs.zephyr-sdk.override {
@@ -52,7 +53,7 @@ let
 in
 
 pkgs.gccMultiStdenv.mkDerivation ({
-  inherit name;
+  inherit name shellHook;
 
   phases = [ ];
 
@@ -86,26 +87,4 @@ pkgs.gccMultiStdenv.mkDerivation ({
 
   ZEPHYR_TOOLCHAIN_VARIANT = "zephyr";
   ZEPHYR_SDK_INSTALL_DIR = "${zephyr-sdk}/zephyr-sdk";
-
-  shellHook = ''
-    if [ -d .west ]
-    then
-      echo 'Workspace already initialized...'
-    else
-      west init
-      west update
-    fi
-    source <(west completion bash)
-    echo
-    echo '__              '
-    echo ' / _ ._ |_   ._ '
-    echo '/_(/_|_)| |\/|  '
-    echo '     |     /    '
-    echo
-    echo 'Zephyr workspace successfully configured.'
-    echo
-    echo 'You can try build and run demo:'
-    echo '  west build -p auto -b qemu_x86 zephyr/samples/hello_world'
-    echo '  west build -t run'
-  '';
 })
