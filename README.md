@@ -1,18 +1,54 @@
-# Nix environment for Zephyr RTOS developers
+# Zephyr Project - Development Environment
 
-I using this config for a year.
+This Nix Flake allows use of Zephyr SDK by applications in a reproducible way. It offers following
+features:
 
-## Usage
+* Selection of toolchains to install, reducing the download size.
+* Allow addition of extra packages inside the development shell.
+* Provide a fully reproducible Python environment with Zephyr SDK requirements.
 
-1. Install [nix](https://nixos.org/download.html)
-2. Clone this repo
-3. Change dir to repo dir and run `nix-shell`
+## Quickstart
 
-## Config
+To use the development shell, you can use a flake such as:
 
-You can select required toolchains and add extra dependencies
-by creating custom derived `shell.nix` (see `shell-*.nix`).
+```nix
+{
+  inputs.nixpkgs.url = "nixpkgs/23.05";
 
-## SDL
+  inputs.zephyr-rtos = {
+    url = "github:katyo/zephyr-rtos.nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
-Add `SDL2` to `inputs` if you need emulated graphic devices.
+  outputs = { nixpkgs, zephyr-rtos, ... }:
+    let
+      supportedSystems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      nixpkgsFor = forAllSystems (system: import nixpkgs {
+        inherit system;
+        overlays = [ zephyr-rtos.overlays.default ];
+      });
+    in
+    {
+      devShells = forAllSystems (system: {
+        default = nixpkgsFor.${system}.mkZephyrSdk { };
+      });
+    };
+}
+```
+
+Once this is done, the `nix develop` command will get you under a development shell ready for Zephyr
+Project development.
+
+## Templates
+
+- `all-toolchains`: using all supported toolchains
+- `arm`: using arm toolchain
+
+## Packages
+
+- `openocd-svd`
+- `openocd-zephyr`
+- `renode`
+- `uncrustify_0_72`
+- `zephyr-sdk`
