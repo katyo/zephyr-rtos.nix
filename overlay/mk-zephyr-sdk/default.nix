@@ -76,7 +76,6 @@ pkgs.gccMultiStdenv.mkDerivation ({
     glib
     libpcap
     pahole
-    openocd-svd
     hidrd
     gitlint
 
