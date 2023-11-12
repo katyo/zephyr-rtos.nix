@@ -62,7 +62,7 @@ pkgs.gccMultiStdenv.mkDerivation ({
     cmake
     ninja
     gnumake
-    clang-tools
+    clang-tools_16
     gperf
     ccache
     dfu-util
