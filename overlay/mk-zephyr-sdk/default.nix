@@ -19,7 +19,6 @@ let
     gcovr
     graphviz
     grpcio-tools
-    imgtool
     intelhex
     junit2html
     junitparser
@@ -62,7 +61,6 @@ pkgs.gccMultiStdenv.mkDerivation ({
     cmake
     ninja
     gnumake
-    clang-tools_16
     gperf
     ccache
     dfu-util
@@ -78,6 +76,9 @@ pkgs.gccMultiStdenv.mkDerivation ({
     pahole
     hidrd
     gitlint
+
+    mcuboot-imgtool
+    clang-tools_16
 
     # toolchain
     zephyr-sdk
