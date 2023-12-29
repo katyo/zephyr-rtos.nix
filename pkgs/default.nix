@@ -8,7 +8,5 @@ rec {
 
   openocd-svd = pkgs.callPackage ./openocd-svd { };
 
-  renode = pkgs.callPackage ./renode { };
-
   uncrustify_0_72 = pkgs.callPackage ./uncrustify-0.72 { };
 }

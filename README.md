@@ -49,6 +49,5 @@ Project development.
 
 - `openocd-svd`
 - `openocd-zephyr`
-- `renode`
 - `uncrustify_0_72`
 - `zephyr-sdk`
