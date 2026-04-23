@@ -1,7 +1,7 @@
-From 8c798302649da05158eb9c58393c867ae4da1ad1 Mon Sep 17 00:00:00 2001
+From 67ad2fc2fd73d9c7227d15a39eb8dac3da527ee6 Mon Sep 17 00:00:00 2001
 From: Evgeniy Didin <didin@synopsys.com>
 Date: Wed, 29 Jul 2020 08:59:36 +0300
-Subject: [PATCH 05/12] tcl/target/snps*: enable autodetection of RTOS
+Subject: [PATCH 12/46] tcl/target/snps*: enable autodetection of RTOS
 
 Signed-off-by: Evgeniy Didin <didin@synopsys.com>
 ---
@@ -63,5 +63,5 @@ index b4f368425..9bfd809a2 100644
  $_TARGETNAME configure -dbgbase $_dbgbase
  $_TARGETNAME configure -event reset-assert "arc_common_reset $_TARGETNAME"
 -- 
-2.40.1
+2.51.2
 

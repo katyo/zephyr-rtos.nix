@@ -1,0 +1,83 @@
+From 7694b191e4da5342892eafc2fcdba7c6e34754cc Mon Sep 17 00:00:00 2001
+From: Liam Fletcher <liam.fletcher@microchip.com>
+Date: Mon, 26 May 2025 10:54:40 +0100
+Subject: [PATCH 16/46] tcl: add embedded flashpro5 config
+
+To support Microchips Embedded Flashpro5
+
+Change-Id: I7861e0772fd4cbf0539725d238c59ae15bbcca41
+Signed-off-by: Liam Fletcher <liam.fletcher@microchip.com>
+Reviewed-on: https://review.openocd.org/c/openocd/+/8879
+Tested-by: jenkins
+Reviewed-by: Antonio Borneo <borneo.antonio@gmail.com>
+Reviewed-by: Tomas Vanek <vanekt@fbl.cz>
+---
+ contrib/60-openocd.rules                      |  4 ++
+ .../microchip/embedded_flashpro5.cfg          | 40 +++++++++++++++++++
+ 2 files changed, 44 insertions(+)
+ create mode 100644 tcl/interface/microchip/embedded_flashpro5.cfg
+
+diff --git a/contrib/60-openocd.rules b/contrib/60-openocd.rules
+index bb6f478a1..1122e1e2a 100644
+--- a/contrib/60-openocd.rules
++++ b/contrib/60-openocd.rules
+@@ -167,6 +167,10 @@ ATTRS{idVendor}=="138e", ATTRS{idProduct}=="9000", MODE="660", GROUP="plugdev",
+ # Debug Board for Neo1973
+ ATTRS{idVendor}=="1457", ATTRS{idProduct}=="5118", MODE="660", GROUP="plugdev", TAG+="uaccess"
+ 
++# Microchip RISC-V Debug
++ATTRS{idVendor}=="1514", ATTRS{idProduct}=="2008", MODE="660", GROUP="plugdev", TAG+="uaccess"
++ATTRS{idVendor}=="1514", ATTRS{idProduct}=="200a", MODE="660", GROUP="plugdev", TAG+="uaccess"
++
+ # OSBDM
+ ATTRS{idVendor}=="15a2", ATTRS{idProduct}=="0042", MODE="660", GROUP="plugdev", TAG+="uaccess"
+ ATTRS{idVendor}=="15a2", ATTRS{idProduct}=="0058", MODE="660", GROUP="plugdev", TAG+="uaccess"
+diff --git a/tcl/interface/microchip/embedded_flashpro5.cfg b/tcl/interface/microchip/embedded_flashpro5.cfg
+new file mode 100644
+index 000000000..117a54458
+--- /dev/null
++++ b/tcl/interface/microchip/embedded_flashpro5.cfg
+@@ -0,0 +1,40 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++#
++# Embedded FlashPro5
++#
++# https://www.microchip.com/en-us/development-tool/flashpro5
++#
++
++adapter driver ftdi
++
++# vidpid 1514:2008 = embedded flashpro5
++# vidpid 1514:200a = pic64gx
++ftdi vid_pid 0x1514 0x2008 0x1514 0x200a
++
++# That FTDI has 4 channels (channel 0 and 1 are MPSSE-capable, 2 and 3 are bitbang
++ftdi channel 0
++
++# Initial Layout - data[0..15] direction[0..15]
++ftdi layout_init 0x0018 0xfdfb
++#     Signal        Data    Direction       Notes
++# AD0 TCK           0       1 (out)         Port A TCK
++# AD1 TDI           0       1 (out)         Port A TDI
++# AD2 TDO           0       0 (in)          PORT A TDO
++# AD3 TMS           1       1 (out)         Port A TMS
++# AD4 GPIOL0        1       1 (out)         Port A TRST
++# AD5 GPIOL1        0       1 (out)         (unused)
++# AD6 GPIOL2        0       1 (out)         (unused)
++# AD7 GPIOL3        0       1 (out)         (unused)
++
++# BD0 TCK           0       1 (out)         FTDI_UART_B_TXD
++# BD1 TDI           0       0 (in)          FTDI_UART_B_RXD
++# BD2 TDO           0       1 (out)         (unused)
++# BD3 TMS           0       1 (out)         (unused)
++# BD4 GPIOL0        0       1 (out)         (unused)
++# BD5 GPIOL1        0       1 (out)         (unused)
++# BD6 GPIOL2        0       1 (out)         (unused)
++# BD7 GPIOL2        0       1 (out)         (unused)
++
++# Signals definition
++ftdi layout_signal nTRST -data 0x0010 -oe 0x0010
+-- 
+2.51.2
+

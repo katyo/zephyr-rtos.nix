@@ -7,7 +7,7 @@ pkgs.extend (self: super: with self; rec {
   });
 
   zephyr-sdk = callPackage ./zephyr-sdk-ng.nix {
-    overrideOpenocd = zephyr-openocd;
+    #overrideOpenocd = zephyr-openocd;
   };
 
   openocd-svd = callPackage ./openocd-svd.nix {};

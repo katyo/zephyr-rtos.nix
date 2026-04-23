@@ -1,0 +1,54 @@
+From e13fb386acfc1a0e8b6dae584c3f13a890ebfca7 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A9r=C3=B4me=20Pouiller?= <jerome.pouiller@silabs.com>
+Date: Mon, 2 Feb 2026 11:59:07 +0100
+Subject: [PATCH 40/46] flash/nor/efm32: Update copyright
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The changes introduced in the previous patches has been inspired from
+various sources. I report here the various the copyrights I have found.
+Note that everything was published under MIT.
+
+Here are the vairous references I have found:
+
+  Peter Johanson:
+    https://review.openocd.org/c/openocd/+/6173
+  Michael Teichgräber:
+    https://github.com/knieriem/openocd-efm32-series2
+  Henrik Persson:
+    https://github.com/mikrodust-henrikp/openocd-efm32-series2
+  Karl Palsson:
+    https://github.com/zephyrproject-rtos/openocd/pull/70
+
+Signed-off-by: Jérôme Pouiller <jerome.pouiller@silabs.com>
+Change-Id: Id87f04c50b0d45c415697811913a6a158d745e62
+---
+ src/flash/nor/efm32.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/flash/nor/efm32.c b/src/flash/nor/efm32.c
+index 77b6a97e0..1852551c7 100644
+--- a/src/flash/nor/efm32.c
++++ b/src/flash/nor/efm32.c
+@@ -16,8 +16,17 @@
+  *   Copyright (C) 2014 Nemui Trinomius                                    *
+  *   nemuisan_kawausogasuki@live.jp                                        *
+  *                                                                         *
++ *   Copyright (C) 2021 Michael Teichgräber                                *
++ *   mteichgraeber@gmx.de                                                  *
++ *                                                                         *
+  *   Copyright (C) 2021 Doug Brunner                                       *
+  *   doug.a.brunner@gmail.com                                              *
++ *                                                                         *
++ *   Copyright (C) 2022 Mikrodust AB                                       *
++ *   henrik.persson@mikrodust.com                                          *
++ *                                                                         *
++ *   Copyright (c) 2026 Silicon Laboratories Inc.                          *
++ *   jerome.pouiller@silabs.com                                            *
+  ***************************************************************************/
+ 
+ #ifdef HAVE_CONFIG_H
+-- 
+2.51.2
+

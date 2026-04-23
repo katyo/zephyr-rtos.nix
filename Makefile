@@ -1,10 +1,6 @@
 versions ?= \
-  0.14.0 \
-  0.14.2 \
-  0.15.0 \
-  0.15.2 \
-  0.16.0 \
-  0.16.3
+  1.0.0 \
+  1.0.1
 
 hosts ?= \
   linux-aarch64 \
@@ -14,24 +10,38 @@ hosts ?= \
   windows-x86_64
 
 toolchains ?= \
+  gnu \
+  llvm
+
+archs ?= \
   aarch64-zephyr-elf \
-  arc64-zephyr-elf \
   arc-zephyr-elf \
+  arc64-zephyr-elf \
   arm-zephyr-eabi \
+  microblazeel-zephyr-elf \
   mips-zephyr-elf \
-  nios2-zephyr-elf \
   riscv64-zephyr-elf \
+  rx-zephyr-elf \
   sparc-zephyr-elf \
   x86_64-zephyr-elf \
+  xtensa-amd_acp_6_0_adsp_zephyr-elf \
+  xtensa-amd_acp_7_0_adsp_zephyr-elf \
+  xtensa-amd_acp_7_3_adsp_zephyr-elf \
+  xtensa-dc233c_zephyr-elf \
   xtensa-espressif_esp32_zephyr-elf \
   xtensa-espressif_esp32s2_zephyr-elf \
-  xtensa-intel_apl_adsp_zephyr-elf \
-  xtensa-intel_bdw_adsp_zephyr-elf \
-  xtensa-intel_byt_adsp_zephyr-elf \
-  xtensa-intel_s1000_zephyr-elf \
+  xtensa-espressif_esp32s3_zephyr-elf \
+  xtensa-intel_ace15_mtpm_zephyr-elf \
+  xtensa-intel_ace30_ptl_zephyr-elf \
+  xtensa-intel_ace40_zephyr-elf \
+  xtensa-intel_tgl_adsp_zephyr-elf \
+  xtensa-mtk_mt818x_adsp_zephyr-elf \
+  xtensa-mtk_mt8195_adsp_zephyr-elf \
+  xtensa-mtk_mt8196_adsp_zephyr-elf \
+  xtensa-mtk_mt8365_adsp_zephyr-elf \
   xtensa-nxp_imx_adsp_zephyr-elf \
   xtensa-nxp_imx8m_adsp_zephyr-elf \
-  xtensa-sample_controller_zephyr-elf
+  xtensa-nxp_imx8ulp_adsp_zephyr-elf
 
 hashes ?= \
   sha256
@@ -48,7 +58,7 @@ hash_url = $(call download_base,$(1))/$(2).sum
 hash_file = $(1).$(2)
 
 # args: version, algo, file pfx
-hash_get = $(shell grep '$(3)[.]' $(call hash_file,$(1),$(2)) | sed -r 's/[[:space:]]+[^[:space:]]+$$//g' | xargs nix --extra-experimental-features nix-command hash to-sri --type sha256)
+hash_get = $(shell grep '$(3)[.]' $(call hash_file,$(1),$(2)) | sed -r 's/[[:space:]]+[^[:space:]]+$$//g' | xargs nix --extra-experimental-features nix-command hash convert --from base16 --hash-algo sha256)
 
 # args: version, algo, file pfx
 file_get = $(shell grep '$(3)[.]' $(call hash_file,$(1),$(2)) | sed -r 's/^[^[:space:]]+[[:space:]]+//g')
@@ -62,8 +72,8 @@ sdk_full_file = zephyr-sdk-$(1)_$(2)
 # args: version, host
 sdk_min_file = zephyr-sdk-$(1)_$(2)_minimal
 
-# args: host, toolchain
-toolchain_file = toolchain_$(1)_$(2)
+# args: kind (gnu|llvm), host_arch, platform_arch
+toolchain_file = toolchain_$(1)_$(2)$(if $(3),_$(3),)
 
 # args: func(version, host, toolchain)
 foreach_all = $(foreach version,$(versions),$(foreach host,$(hosts),$(foreach toolchain,$(toolchains),$(call $(1),$(version),$(host),$(toolchain)))))
@@ -112,7 +122,8 @@ $(call put_hash,      ,hosttools,$(1),$(call hosttools_file,$(2)))\
 $(call put_hash,      ,full,$(1),$(call sdk_full_file,$(1),$(2)))\
 $(call put_hash,      ,minimal,$(1),$(call sdk_min_file,$(1),$(2)))
       toolchains = {\
-$(foreach toolchain,$(toolchains),$(call put_hash,        ,\"$(toolchain)\",$(1),$(call toolchain_file,$(2),$(toolchain))))
+$(call put_hash,        ,"llvm",$(1),$(call toolchain_file,llvm,$(2)))\
+$(foreach arch,$(archs),$(call put_hash,        ,\"$(arch)\",$(1),$(call toolchain_file,gnu,$(2),$(arch))))
       };
     };
 endef

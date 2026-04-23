@@ -1,0 +1,343 @@
+From ad756adfa562b9267ffd9579d6432f208f46eecf Mon Sep 17 00:00:00 2001
+From: Mark O'Donovan <shiftee@posteo.net>
+Date: Fri, 23 Jan 2026 18:51:27 +0000
+Subject: [PATCH 23/46] tcl/target: Backport missing max32 target configs
+
+---
+ tcl/target/max32670.cfg        |  34 +++++++++
+ tcl/target/max32672.cfg        |  26 +++++++
+ tcl/target/max32675.cfg        |  35 ++++++++++
+ tcl/target/max32680.cfg        |  19 +++++
+ tcl/target/max32690.cfg        |  46 ++++++++++++
+ tcl/target/max32xxx_common.cfg | 124 +++++++++++++++++++++++++++++++++
+ 6 files changed, 284 insertions(+)
+ create mode 100644 tcl/target/max32670.cfg
+ create mode 100644 tcl/target/max32672.cfg
+ create mode 100644 tcl/target/max32675.cfg
+ create mode 100644 tcl/target/max32680.cfg
+ create mode 100644 tcl/target/max32690.cfg
+ create mode 100644 tcl/target/max32xxx_common.cfg
+
+diff --git a/tcl/target/max32670.cfg b/tcl/target/max32670.cfg
+new file mode 100644
+index 000000000..92dc6e12f
+--- /dev/null
++++ b/tcl/target/max32670.cfg
+@@ -0,0 +1,34 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32670 - Arm Cortex-M4F @ 100MHz
++
++# Set the reset pin configuration
++reset_config none
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x60000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x2000
++set FLASH_CLK 96
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
++
++# Early revisions of the MAX32670 will disable SWD upon reset. There are reserved address locations
++# in the ROM code that can be used to insert breakpoints.
++# This workaround will enable SWD for affected revisions.
++$_CHIPNAME.cpu configure -event reset-assert-pre {
++	if {$halt} {catch {bp 0x00002174 2 hw}}
++}
++
++$_CHIPNAME.cpu configure -event reset-deassert-post {
++	if {$halt} {
++		$::_CHIPNAME.cpu arp_poll
++		$::_CHIPNAME.cpu arp_poll
++		$::_CHIPNAME.cpu arp_halt
++		rbp 0x00002174
++	}
++}
+diff --git a/tcl/target/max32672.cfg b/tcl/target/max32672.cfg
+new file mode 100644
+index 000000000..9709b699f
+--- /dev/null
++++ b/tcl/target/max32672.cfg
+@@ -0,0 +1,26 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32672 - Arm Cortex-M4F @ 100MHz
++
++# Set the reset pin configuration
++reset_config none
++adapter srst pulse_width 200
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x80000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x2000
++set FLASH_CLK 96
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
++
++# Add additional flash bank
++set FLASH_BASE 0x10080000
++set FLC_BASE 0x40029400
++
++flash bank $_CHIPNAME.flash1 max32xxx $FLASH_BASE $FLASH_SIZE 0 0 $_CHIPNAME.cpu \
++$FLC_BASE $FLASH_SECTOR $FLASH_CLK $FLASH_OPTIONS
+diff --git a/tcl/target/max32675.cfg b/tcl/target/max32675.cfg
+new file mode 100644
+index 000000000..ade025db0
+--- /dev/null
++++ b/tcl/target/max32675.cfg
+@@ -0,0 +1,35 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32675 - Arm Cortex-M4F @ 100MHz
++
++# Set the reset pin configuration
++reset_config none
++adapter srst pulse_width 200
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x60000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x2000
++set FLASH_CLK 96
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
++
++# Early revisions of the MAX32675 will disable SWD upon reset. There are reserved address locations
++# in the ROM code that can be used to insert breakpoints.
++# This workaround will enable SWD for affected revisions.
++$_CHIPNAME.cpu configure -event reset-assert-pre {
++	if {$halt} {catch {bp 0x00002174 2 hw}}
++}
++
++$_CHIPNAME.cpu configure -event reset-deassert-post {
++	if {$halt} {
++		$::_CHIPNAME.cpu arp_poll
++		$::_CHIPNAME.cpu arp_poll
++		$::_CHIPNAME.cpu arp_halt
++		rbp 0x00002174
++	}
++}
+diff --git a/tcl/target/max32680.cfg b/tcl/target/max32680.cfg
+new file mode 100644
+index 000000000..ebb2e341d
+--- /dev/null
++++ b/tcl/target/max32680.cfg
+@@ -0,0 +1,19 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32680 - Arm Cortex-M4F @ 100MHz
++
++# Set the reset pin configuration
++reset_config srst_only
++adapter srst pulse_width 2
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x80000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x2000
++set FLASH_CLK 100
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
+diff --git a/tcl/target/max32690.cfg b/tcl/target/max32690.cfg
+new file mode 100644
+index 000000000..de9d233be
+--- /dev/null
++++ b/tcl/target/max32690.cfg
+@@ -0,0 +1,46 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32690 - Arm Cortex-M4F @ 120MHz
++
++# Set the reset pin configuration
++reset_config srst_only
++adapter srst pulse_width 2
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x300000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x4000
++set FLASH_CLK 60
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
++
++# Add additional flash bank
++set FLASH_BASE 0x10300000
++set FLASH_SIZE 0x40000
++set FLC_BASE 0x40029400
++set FLASH_SECTOR 0x2000
++
++flash bank $_CHIPNAME.flash1 max32xxx $FLASH_BASE $FLASH_SIZE 0 0 $_CHIPNAME.cpu \
++$FLC_BASE $FLASH_SECTOR $FLASH_CLK $FLASH_OPTIONS
++
++# Early revisions of the MAX32690 will disable SWD upon reset. There are reserved address locations
++# in the ROM code that can be used to insert breakpoints.
++# This workaround will enable SWD for affected revisions.
++$_CHIPNAME.cpu configure -event reset-assert-pre {
++   if {$halt} {
++      catch {bp 0x0000FFF4 2 hw}
++   }
++}
++
++$_CHIPNAME.cpu configure -event reset-deassert-post {
++   if {$halt} {
++      $::_CHIPNAME.cpu arp_poll
++      $::_CHIPNAME.cpu arp_poll
++      $::_CHIPNAME.cpu arp_halt
++      rbp 0x0000FFF4
++   }
++}
+diff --git a/tcl/target/max32xxx_common.cfg b/tcl/target/max32xxx_common.cfg
+new file mode 100644
+index 000000000..e8e2dd428
+--- /dev/null
++++ b/tcl/target/max32xxx_common.cfg
+@@ -0,0 +1,124 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated max32xxx OpenOCD driver configuration file.
++# Contains common settings for max32xxx devices.
++
++source [find mem_helper.tcl]
++source [find target/swj-dp.tcl]
++
++# Target configuration
++if { [info exists CHIPNAME] } {
++   set _CHIPNAME $CHIPNAME
++} else {
++   set _CHIPNAME max32xxx
++}
++
++# Add reserved TAP
++if { [using_jtag] && [info exists RSV_TAP] } {
++   jtag newtap $_CHIPNAME cpu -irlen 4 -ircapture 0x1 -irmask 0xf -ignore-version
++   jtag newtap rsvtap tap -irlen 4 -irmask 0xf -ircapture 0x1 -ignore-version
++} else {
++   swj_newdap $_CHIPNAME cpu -irlen 4 -ircapture 0x1 -irmask 0xf -ignore-version
++}
++
++
++dap create $_CHIPNAME.dap -chain-position $_CHIPNAME.cpu
++target create $_CHIPNAME.cpu cortex_m -dap $_CHIPNAME.dap
++
++# Enable thread-aware debugging
++$_CHIPNAME.cpu configure -rtos hwthread
++
++# Setup working area
++if { [info exists WORK_START] } {
++   set _WORK_START $WORK_START
++} else {
++   set _WORK_START 0x20005000
++}
++
++if { [info exists WORK_SIZE] } {
++   set _WORK_SIZE $WORK_SIZE
++} else {
++   set _WORK_SIZE 0x8000
++}
++
++$_CHIPNAME.cpu configure -work-area-phys $_WORK_START -work-area-size $_WORK_SIZE
++
++# Configure flash driver
++if { [info exists FLASH_BASE] } {
++   set _FLASH_BASE $FLASH_BASE
++} else {
++   set _FLASH_BASE 0x10000000
++}
++
++if { [info exists FLASH_SIZE] } {
++   set _FLASH_SIZE $FLASH_SIZE
++} else {
++   set _FLASH_SIZE 0x10000
++}
++
++if { [info exists FLC_BASE] } {
++   set _FLC_BASE $FLC_BASE
++} else {
++   set _FLC_BASE 0x40029000
++}
++
++if { [info exists FLASH_SECTOR] } {
++   set _FLASH_SECTOR $FLASH_SECTOR
++} else {
++   set _FLASH_SECTOR 0x2000
++}
++
++if { [info exists FLASH_CLK] } {
++   set _FLASH_CLK $FLASH_CLK
++} else {
++   set _FLASH_CLK 96
++}
++
++# OPTIONS_128                     0x01 /* Perform 128 bit flash writes */
++# OPTIONS_ENC                     0x02 /* Encrypt the flash contents */
++# OPTIONS_AUTH                    0x04 /* Authenticate the flash contents */
++# OPTIONS_COUNT                   0x08 /* Add counter values to authentication */
++# OPTIONS_INTER                   0x10 /* Interleave the authentication and count values*/
++# OPTIONS_RELATIVE_XOR            0x20 /* Only XOR the offset of the address when encrypting */
++# OPTIONS_KEYSIZE                 0x40 /* Use a 256 bit KEY */
++
++if { [info exists FLASH_OPTIONS] } {
++   set _FLASH_OPTIONS $FLASH_OPTIONS
++} else {
++   set _FLASH_OPTIONS 0
++}
++
++flash bank $_CHIPNAME.flash max32xxx $_FLASH_BASE $_FLASH_SIZE 0 0 $_CHIPNAME.cpu \
++$_FLC_BASE $_FLASH_SECTOR $_FLASH_CLK $_FLASH_OPTIONS
++
++# call allow_low_pwr_dbg to set this to 1
++set ALLOW_LOW_PWR_DBG 0
++
++proc allow_low_pwr_dbg {} {
++   global ALLOW_LOW_PWR_DBG
++
++   # set our low-power debug flag
++   set ALLOW_LOW_PWR_DBG 1
++}
++
++# enable debug in case of low-power mode
++proc enable_debug {} {
++   set DBGKEY 0xA05F0000
++   set C_DEBUGEN 0x00000001
++   set C_HALT 0x00000002
++
++   echo "Enable debug to connect in low-power mode"
++
++   # enable debug
++   mww 0xE000EDF0 [expr {$DBGKEY | $C_HALT | $C_DEBUGEN}]
++
++   # allow for time waking up
++   sleep 500
++}
++
++$_CHIPNAME.cpu configure -event reset-deassert-post {
++   global ALLOW_LOW_PWR_DBG
++
++   if { $ALLOW_LOW_PWR_DBG == 1 } {
++      enable_debug
++   }
++}
+-- 
+2.51.2
+

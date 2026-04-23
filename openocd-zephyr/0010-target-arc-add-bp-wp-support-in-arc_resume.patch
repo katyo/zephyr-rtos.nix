@@ -1,16 +1,16 @@
-From 7e2e08a3e3c3d16ca5bfd5af3fb15925683dcad7 Mon Sep 17 00:00:00 2001
+From 3e4770986b4a53f10125f2c1f8b76c069a088829 Mon Sep 17 00:00:00 2001
 From: Evgeniy Didin <didin@synopsys.com>
 Date: Fri, 31 Jul 2020 00:13:12 +0300
-Subject: [PATCH 03/12] target/arc: add bp/wp support in arc_resume
+Subject: [PATCH 10/46] target/arc: add bp/wp support in arc_resume
 
 Signed-off-by: Evgeniy Didin <didin@synopsys.com>
 Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
 ---
- src/target/arc.c | 93 ++++++++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 93 insertions(+)
+ src/target/arc.c | 95 +++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 94 insertions(+), 1 deletion(-)
 
 diff --git a/src/target/arc.c b/src/target/arc.c
-index 9ae3ae610..096e0fd84 100644
+index 9ae3ae610..0201fc3f9 100644
 --- a/src/target/arc.c
 +++ b/src/target/arc.c
 @@ -50,6 +50,14 @@
@@ -23,7 +23,7 @@ index 9ae3ae610..096e0fd84 100644
 +		struct breakpoint *breakpoint);
 +static int arc_set_breakpoint(struct target *target,
 +		struct breakpoint *breakpoint);
-+static int arc_config_step(struct target *target, int enable_step);
++int arc_config_step(struct target *target, int enable_step);
 +
  
  void arc_reg_data_type_add(struct target *target,
@@ -136,7 +136,7 @@ index 9ae3ae610..096e0fd84 100644
  static int arc_add_watchpoint(struct target *target,
  	struct watchpoint *watchpoint)
  {
-@@ -1963,6 +2044,18 @@ static int arc_hit_watchpoint(struct target *target, struct watchpoint **hit_wat
+@@ -1963,9 +2044,21 @@ static int arc_hit_watchpoint(struct target *target, struct watchpoint **hit_wat
  	return ERROR_FAIL;
  }
  
@@ -154,7 +154,11 @@ index 9ae3ae610..096e0fd84 100644
 +
  /* Helper function which switches core to single_step mode by
   * doing aux r/w operations.  */
- static int arc_config_step(struct target *target, int enable_step)
+-static int arc_config_step(struct target *target, int enable_step)
++int arc_config_step(struct target *target, int enable_step)
+ {
+ 	uint32_t value;
+ 
 -- 
-2.40.1
+2.51.2
 

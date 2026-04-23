@@ -20,24 +20,26 @@ in pkgs.gccMultiStdenv.mkDerivation {
     dfu-util
     dtc
     wget
-    gcc11
+    gcc13
     xz
     file
     # net-tools support
-    pkgconfig
+    pkg-config
     glib
     libpcap
     # toolchain
     zephyr-sdk
+    zephyr-openocd
     pahole
     openocd-svd
     hidrd
     autoPatchelfHook
-  ] ++ (with pkgs.python3Packages; [
+  ] ++ (with pkgs.python312Packages; [
     anytree
     pyelftools
     venvShellHook
     west
+    jsonschema
   ]) ++ inputs;
 
   ZEPHYR_TOOLCHAIN_VARIANT = "zephyr";

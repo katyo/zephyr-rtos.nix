@@ -1,7 +1,7 @@
-From c8a128aa8423c286ed7f3d7b20703070e56a8f32 Mon Sep 17 00:00:00 2001
+From e223008a06f84a9bb940ee9de0dbf057eae1e25b Mon Sep 17 00:00:00 2001
 From: Edward Fewell <efewell@ti.com>
 Date: Thu, 14 May 2020 08:23:03 -0500
-Subject: [PATCH 02/12] [RFC] target/cortex_m: Block extra srst asserts in
+Subject: [PATCH 02/46] [RFC] target/cortex_m: Block extra srst asserts in
  target code
 
 This is intended to be a temporary work around for an issue where
@@ -118,5 +118,5 @@ index b9ccf3123..51050b475 100644
 +reset_config srst_once
 +adapter srst delay 100
 -- 
-2.40.1
+2.51.2
 

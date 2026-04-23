@@ -1,0 +1,67 @@
+From 3b6dbddc5987434117f8416d375bf6a0e0245e9f Mon Sep 17 00:00:00 2001
+From: Marek Kraus <gamelaster@outlook.com>
+Date: Wed, 23 Oct 2024 16:27:33 +0200
+Subject: [PATCH 19/46] tcl/target/bl702: implement full software reset
+
+In previous implementation, it was known that it does not perform
+full reset, and that some peripherals, such as GLB core,
+which handles among other stuff GPIOs, was not reset.
+
+It was presumed, that full reset by software is not possible,
+although, by accident, even when comment says that
+CTRL_PWRON_RESET is set to 1, it is not
+(value written into 0x40000018 supposed to be 0x7, not 0x6).
+
+CTRL_PWRON_RESET indeed triggers full "power-on like" reset,
+so this method is implemented in this commit.
+There are some workarounds to make reset seamless, without any
+error messages, which are described in comments of TCL script.
+
+Only down-side of this reset is, that chip is halted after reset
+bit later in BootROM than previous implementation,
+but it's still good.
+
+Change-Id: Ife2cdcc6a2d96a2e24039bfec149705baf046318
+Signed-off-by: Marek Kraus <gamelaster@outlook.com>
+Reviewed-on: https://review.openocd.org/c/openocd/+/8529
+Reviewed-by: Antonio Borneo <borneo.antonio@gmail.com>
+Tested-by: jenkins
+---
+ tcl/target/bl702.cfg | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/tcl/target/bl702.cfg b/tcl/target/bl702.cfg
+index 6d4a048d9..5046cd189 100644
+--- a/tcl/target/bl702.cfg
++++ b/tcl/target/bl702.cfg
+@@ -34,6 +34,10 @@ $_TARGETNAME configure -work-area-phys 0x22020000 -work-area-size 0x10000 -work-
+ # Internal RC ticks on 32 MHz, so this speed should be safe to use.
+ adapter speed 4000
+ 
++# Debug Module's ndmreset resets only Trust Zone Controller, so we need to do SW reset instead.
++# CTRL_PWRON_RESET triggers full "power-on like" reset.
++# This means that pinmux configuration to access JTAG is reset as well, and configured back early
++# in BootROM.
+ $_TARGETNAME configure -event reset-assert-pre {
+ 	halt
+ 
+@@ -55,6 +59,15 @@ $_TARGETNAME configure -event reset-assert-pre {
+ 	# Do reset
+ 	# In GLB_SWRST_CFG2, clear CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET
+ 	mmw 0x40000018 0x0 0x00000007
++
++	# Since this full software reset resets GPIO pinmux as well, we will lose access
++	# to JTAG right away after writing to register. This chip doesn't support abstract
++	# memory access, so when this is done by progbuf or sysbus, OpenOCD will fail to read
++	# if write was successful or not, and will print error about that. Since receiving of
++	# this error is expected, we will turn off log printing for a moment,
++	set lvl [lindex [debug_level] 1]
++	debug_level -1
+ 	# In GLB_SWRST_CFG2, set CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET to 1
+-	mmw 0x40000018 0x6 0x0
++	catch {mmw 0x40000018 0x7 0x0}
++	debug_level $lvl
+ }
+-- 
+2.51.2
+

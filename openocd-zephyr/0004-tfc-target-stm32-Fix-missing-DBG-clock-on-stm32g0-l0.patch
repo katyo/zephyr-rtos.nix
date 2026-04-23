@@ -1,7 +1,7 @@
-From 16420637a27fe44c954bf0d6e0ef751d6fd4ff9b Mon Sep 17 00:00:00 2001
+From fe8741bd097bb7d7214c329cc103cdf90f21c931 Mon Sep 17 00:00:00 2001
 From: Erwan Gouriou <erwan.gouriou@linaro.org>
 Date: Thu, 23 Sep 2021 14:19:25 +0200
-Subject: [PATCH 07/12] tfc/target: stm32: Fix missing DBG clock on stm32g0/l0
+Subject: [PATCH 04/46] tfc/target: stm32: Fix missing DBG clock on stm32g0/l0
 
 On stm32g0 and stm32l0 series, DGCMCU clock should be enabled
 before any access.
@@ -44,5 +44,5 @@ index b4bdb18a4..d5e68220e 100644
  	mmw 0x40015804 0x00000007 0
  
 -- 
-2.40.1
+2.51.2
 

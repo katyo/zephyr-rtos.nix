@@ -1,0 +1,124 @@
+From 28eeee3b3f2daec77ceb687ed88ab336823d0090 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A9r=C3=B4me=20Pouiller?= <jerome.pouiller@silabs.com>
+Date: Fri, 23 Jan 2026 13:38:01 +0100
+Subject: [PATCH 42/46] tcl/target: Add support for Silabs Series 2 products
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Let's introduce one file per EFR32/EFM32 family so the final user
+does not have to find the tweaks for every parts.
+
+Signed-off-by: Jérôme Pouiller <jerome.pouiller@silabs.com>
+Change-Id: I544282be675e3dbf9194da615d7f8865631612a2
+---
+ tcl/target/silabs/xg21.cfg | 7 +++++++
+ tcl/target/silabs/xg23.cfg | 7 +++++++
+ tcl/target/silabs/xg24.cfg | 7 +++++++
+ tcl/target/silabs/xg25.cfg | 7 +++++++
+ tcl/target/silabs/xg26.cfg | 7 +++++++
+ tcl/target/silabs/xg28.cfg | 7 +++++++
+ tcl/target/silabs/xg29.cfg | 7 +++++++
+ 7 files changed, 49 insertions(+)
+ create mode 100644 tcl/target/silabs/xg21.cfg
+ create mode 100644 tcl/target/silabs/xg23.cfg
+ create mode 100644 tcl/target/silabs/xg24.cfg
+ create mode 100644 tcl/target/silabs/xg25.cfg
+ create mode 100644 tcl/target/silabs/xg26.cfg
+ create mode 100644 tcl/target/silabs/xg28.cfg
+ create mode 100644 tcl/target/silabs/xg29.cfg
+
+diff --git a/tcl/target/silabs/xg21.cfg b/tcl/target/silabs/xg21.cfg
+new file mode 100644
+index 000000000..bc6e50cea
+--- /dev/null
++++ b/tcl/target/silabs/xg21.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG21/EFR32xG21 target
++
++set FLASHBASE 0x00000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg23.cfg b/tcl/target/silabs/xg23.cfg
+new file mode 100644
+index 000000000..c166f2fc4
+--- /dev/null
++++ b/tcl/target/silabs/xg23.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG23/EFR32xG23 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg24.cfg b/tcl/target/silabs/xg24.cfg
+new file mode 100644
+index 000000000..ad40c597e
+--- /dev/null
++++ b/tcl/target/silabs/xg24.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG24/EFR32xG24 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg25.cfg b/tcl/target/silabs/xg25.cfg
+new file mode 100644
+index 000000000..e238755be
+--- /dev/null
++++ b/tcl/target/silabs/xg25.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG25/EFR32xG25 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg26.cfg b/tcl/target/silabs/xg26.cfg
+new file mode 100644
+index 000000000..8aa0c7af1
+--- /dev/null
++++ b/tcl/target/silabs/xg26.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG26/EFR32xG26 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg28.cfg b/tcl/target/silabs/xg28.cfg
+new file mode 100644
+index 000000000..15705c486
+--- /dev/null
++++ b/tcl/target/silabs/xg28.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG28/EFR32xG28 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+diff --git a/tcl/target/silabs/xg29.cfg b/tcl/target/silabs/xg29.cfg
+new file mode 100644
+index 000000000..224b516fb
+--- /dev/null
++++ b/tcl/target/silabs/xg29.cfg
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: BSD-3-Clause
++# Copyright (c) 2026 Silicon Laboratories Inc.
++#
++# Silicon Labs EFM32PG29/EFR32xG29 target
++
++set FLASHBASE 0x08000000
++source [find target/silabs/series2.cfg]
+-- 
+2.51.2
+

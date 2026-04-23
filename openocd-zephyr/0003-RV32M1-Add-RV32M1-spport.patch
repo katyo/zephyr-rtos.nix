@@ -1,7 +1,7 @@
-From 8de4e8cc9ce681b6fbc68bcf04939e705f27af7f Mon Sep 17 00:00:00 2001
+From 4f08d4bfa7d33d85f7ffea54847d1d5cd83f4316 Mon Sep 17 00:00:00 2001
 From: Kumar Gala <kumar.gala@linaro.org>
 Date: Tue, 30 Oct 2018 06:33:36 +0800
-Subject: [PATCH 06/12] [RV32M1] Add RV32M1 spport
+Subject: [PATCH 03/46] [RV32M1] Add RV32M1 spport
 
 This is based on https://github.com/open-isa-rv32m1/rv32m1-openocd
 commit SHA 753dde2a62d9ea1f73c29bf95c771c653966b8ea with various
@@ -3972,5 +3972,5 @@ index 000000000..efd0df9f3
 +
 +init
 -- 
-2.40.1
+2.51.2
 

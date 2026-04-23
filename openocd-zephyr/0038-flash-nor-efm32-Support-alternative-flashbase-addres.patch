@@ -1,0 +1,95 @@
+From 7737aad97355d6ba4258d615219c1b089bc0c913 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A9r=C3=B4me=20Pouiller?= <jerome.pouiller@silabs.com>
+Date: Wed, 4 Feb 2026 13:57:35 +0100
+Subject: [PATCH 38/46] flash/nor/efm32: Support alternative flashbase address
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Silicon Labs Series-2 chips don't start the flash at the same address.
+
+Co-developed-by: Peter Johanson <peter@peterjohanson.com>
+Signed-off-by: Peter Johanson <peter@peterjohanson.com>
+Signed-off-by: Jérôme Pouiller <jerome.pouiller@silabs.com>
+Change-Id: I586e6b0e26de141db298dbb9329413642cb8a840
+---
+ src/flash/nor/efm32.c | 21 ++++++++++++++++-----
+ 1 file changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/src/flash/nor/efm32.c b/src/flash/nor/efm32.c
+index 33fe10fdd..d7e64a4e1 100644
+--- a/src/flash/nor/efm32.c
++++ b/src/flash/nor/efm32.c
+@@ -31,7 +31,8 @@
+ #include <target/armv7m.h>
+ #include <target/cortex_m.h>
+ 
+-#define EFM32_FLASH_BASE                0
++#define EFM32_FLASH_BASE_V1             0x00000000
++#define EFM32_FLASH_BASE_V2             0x08000000
+ 
+ /* size in bytes, not words; must fit all Gecko devices */
+ #define LOCKWORDS_SZ                    512
+@@ -112,7 +113,8 @@ enum efm32_bank_index {
+ static int efm32_get_bank_index(target_addr_t base)
+ {
+ 	switch (base) {
+-	case EFM32_FLASH_BASE:
++	case EFM32_FLASH_BASE_V1:
++	case EFM32_FLASH_BASE_V2:
+ 		return EFM32_BANK_INDEX_MAIN;
+ 	case EFM32_MSC_USER_DATA:
+ 		return EFM32_BANK_INDEX_USER_DATA;
+@@ -734,7 +736,8 @@ static int efm32_get_page_lock(struct flash_bank *bank, size_t page)
+ 	uint32_t mask = 0;
+ 
+ 	switch (bank->base) {
+-	case EFM32_FLASH_BASE:
++	case EFM32_FLASH_BASE_V1:
++	case EFM32_FLASH_BASE_V2:
+ 		dw = efm32_info->lb_page[page >> 5];
+ 		mask = BIT(page & 0x1f);
+ 		break;
+@@ -755,7 +758,8 @@ static int efm32_set_page_lock(struct flash_bank *bank, size_t page, int set)
+ {
+ 	struct efm32_flash_chip *efm32_info = bank->driver_priv;
+ 
+-	if (bank->base != EFM32_FLASH_BASE) {
++	if (bank->base != EFM32_FLASH_BASE_V1 &&
++	    bank->base != EFM32_FLASH_BASE_V2) {
+ 		LOG_ERROR("Locking user and lockbits pages is not supported yet");
+ 		return ERROR_FAIL;
+ 	}
+@@ -1156,6 +1160,7 @@ static int efm32_probe(struct flash_bank *bank)
+ {
+ 	struct efm32_flash_chip *efm32_info = bank->driver_priv;
+ 	struct efm32_info *efm32_mcu_info = &efm32_info->info;
++	uint32_t base_address = EFM32_FLASH_BASE_V2;
+ 	int bank_index = efm32_get_bank_index(bank->base);
+ 	char strbuf[256];
+ 	int ret;
+@@ -1169,6 +1174,12 @@ static int efm32_probe(struct flash_bank *bank)
+ 	if (ret != ERROR_OK)
+ 		return ret;
+ 
++	if (efm32_mcu_info->family_data->series == 0 ||
++	    efm32_mcu_info->family_data->series == 1 ||
++	    FIELD_GET(EFM32_DI_PARTINFO_FAMILY_MASK, efm32_mcu_info->part_info) == 21 ||
++	    FIELD_GET(EFM32_DI_PARTINFO_FAMILY_MASK, efm32_mcu_info->part_info) == 22)
++		base_address = EFM32_FLASH_BASE_V1;
++
+ 	LOG_INFO("detected part: %s",
+ 		 efm32_get_str_identifier(efm32_mcu_info, strbuf, sizeof(strbuf)));
+ 	LOG_INFO("flash size = %d KiB", efm32_mcu_info->flash_sz_kib);
+@@ -1181,7 +1192,7 @@ static int efm32_probe(struct flash_bank *bank)
+ 
+ 	efm32_mcs_clock_enable(bank);
+ 
+-	if (bank->base == EFM32_FLASH_BASE) {
++	if (bank->base == base_address) {
+ 		bank->num_sectors = efm32_mcu_info->flash_sz_kib * 1024 / efm32_mcu_info->page_size;
+ 		assert(bank->num_sectors > 0);
+ 
+-- 
+2.51.2
+

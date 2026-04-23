@@ -1,7 +1,7 @@
-From 8e886557898699cc40634479de119fb601105484 Mon Sep 17 00:00:00 2001
+From 3bf109773d37c43fefefe1c92ab0440b1ecf96ab Mon Sep 17 00:00:00 2001
 From: Evgeniy Didin <didin@synopsys.com>
 Date: Tue, 28 Jul 2020 15:26:03 +0300
-Subject: [PATCH 04/12] target/arc: introduce SMP support
+Subject: [PATCH 11/46] target/arc: introduce SMP support
 
 Signed-off-by: Evgeniy Didin <didin@synopsys.com>
 Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
@@ -15,13 +15,13 @@ Signed-off-by: Stephanos Ioannidis <root@stephanos.io>
  create mode 100644 tcl/target/snps_hsdk_smp.cfg
 
 diff --git a/src/target/arc.c b/src/target/arc.c
-index 096e0fd84..547edc148 100644
+index 0201fc3f9..2a8ae106a 100644
 --- a/src/target/arc.c
 +++ b/src/target/arc.c
 @@ -57,6 +57,8 @@ static int arc_unset_breakpoint(struct target *target,
  static int arc_set_breakpoint(struct target *target,
  		struct breakpoint *breakpoint);
- static int arc_config_step(struct target *target, int enable_step);
+ int arc_config_step(struct target *target, int enable_step);
 +static int arc_halt(struct target *target);
 +static int arc_poll(struct target *target);
  
@@ -370,5 +370,5 @@ index 000000000..73139f8fa
 +#target smp $_CHIPNAME.cpu4 $_CHIPNAME.cpu3 $_CHIPNAME.cpu2 $_CHIPNAME.cpu1
 +target smp $_TARGETNAME3 $_TARGETNAME2 $_TARGETNAME1 $_TARGETNAME
 -- 
-2.40.1
+2.51.2
 

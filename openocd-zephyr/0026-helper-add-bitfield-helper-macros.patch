@@ -1,0 +1,103 @@
+From 8a2f6c1918715ed2d88b53cff026fc5fe4147fa3 Mon Sep 17 00:00:00 2001
+From: Walter Ji <walter.ji@oss.cipunited.com>
+Date: Mon, 4 Mar 2024 17:29:15 +0800
+Subject: [PATCH 26/46] helper: add bitfield helper macros
+
+This patch ports FIELD_{GET,PREP,FIT} macros and related macro
+from FreeBSD, referenced file:
+- `src/tree/sys/compat/linuxkpi/common/include/linux/bitfield.h`
+
+Checkpatch-ignore: MACRO_ARG_REUSE
+
+Change-Id: I6fdf4514d3f95d62fadf7654409a4878d470a600
+Signed-off-by: Walter Ji <walter.ji@oss.cipunited.com>
+Reviewed-on: https://review.openocd.org/c/openocd/+/8171
+Tested-by: jenkins
+Reviewed-by: Antonio Borneo <borneo.antonio@gmail.com>
+---
+ src/helper/Makefile.am |  1 +
+ src/helper/bitfield.h  | 60 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 61 insertions(+)
+ create mode 100644 src/helper/bitfield.h
+
+diff --git a/src/helper/Makefile.am b/src/helper/Makefile.am
+index 7354f5422..2a660c9fb 100644
+--- a/src/helper/Makefile.am
++++ b/src/helper/Makefile.am
+@@ -17,6 +17,7 @@ noinst_LTLIBRARIES += %D%/libhelper.la
+ 	%D%/jim-nvp.c \
+ 	%D%/align.h \
+ 	%D%/binarybuffer.h \
++	%D%/bitfield.h \
+ 	%D%/bits.h \
+ 	%D%/configuration.h \
+ 	%D%/list.h \
+diff --git a/src/helper/bitfield.h b/src/helper/bitfield.h
+new file mode 100644
+index 000000000..9f397282c
+--- /dev/null
++++ b/src/helper/bitfield.h
+@@ -0,0 +1,60 @@
++/* SPDX-License-Identifier: BSD-2-Clause */
++
++/*
++* Copyright (c) 2020-2024 The FreeBSD Foundation
++*
++* This software was developed by Björn Zeeb under sponsorship from
++* the FreeBSD Foundation.
++*/
++
++#ifndef OPENOCD_HELPER_BITFIELD_H
++#define OPENOCD_HELPER_BITFIELD_H
++
++/**
++ * These macros come from FreeBSD, check source on
++ * https://cgit.freebsd.org/src/tree/sys/compat/linuxkpi/common/include/linux/bitfield.h
++ * Which does not include example usages of them.
++ */
++
++#define __bf_shf(x) (__builtin_ffsll(x) - 1)
++
++/**
++ * FIELD_FIT(_mask, _value) - Check if a value fits in the specified bitfield mask
++ * @_mask: Bitfield mask
++ * @_value: Value to check
++ *
++ * This macro checks whether a given value fits within the range defined by the
++ * specified bitfield mask. It ensures that no bits outside the mask are set.
++ *
++ * Return: true if the value fits, false otherwise.
++ */
++#define FIELD_FIT(_mask, _value) \
++	(!(((typeof(_mask))(_value) << __bf_shf(_mask)) & ~(_mask)))
++
++/**
++ * FIELD_PREP(_mask, _value) - Prepare a value for insertion into a bitfield
++ * @_mask: Bitfield mask
++ * @_value: Value to insert
++ *
++ * This macro prepares a value for insertion into a bitfield by shifting the
++ * value into the position defined by the mask and applying the mask.
++ *
++ * Return: The prepared bitfield value.
++ */
++#define FIELD_PREP(_mask, _value) \
++	(((typeof(_mask))(_value) << __bf_shf(_mask)) & (_mask))
++
++/**
++ * FIELD_GET(_mask, _value) - Extract a value from a bitfield
++ * @_mask: Bitfield mask
++ * @_value: Bitfield value to extract from
++ *
++ * This macro extracts a value from a bitfield by masking and shifting the
++ * relevant bits down to the least significant position.
++ *
++ * Return: The extracted value.
++ */
++#define FIELD_GET(_mask, _value) \
++	((typeof(_mask))(((_value) & (_mask)) >> __bf_shf(_mask)))
++
++#endif /* OPENOCD_HELPER_BITFIELD_H */
+-- 
+2.51.2
+

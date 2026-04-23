@@ -1,0 +1,44 @@
+From b9a2f7bd77b65e8c1c8c644cb88fdd4945bed9a0 Mon Sep 17 00:00:00 2001
+From: Mark O'Donovan <shiftee@posteo.net>
+Date: Sun, 21 Dec 2025 11:13:40 +0000
+Subject: [PATCH 25/46] tcl/target: Add max32662.cfg
+
+Config file added and tested on max32662evkit
+
+Change-Id: I20cff70aaf8bb4577ba1e6f658afdd3b96e13145
+Signed-off-by: Mark O'Donovan <shiftee@posteo.net>
+Reviewed-on: https://review.openocd.org/c/openocd/+/9325
+Reviewed-by: Tomas Vanek <vanekt@fbl.cz>
+Tested-by: jenkins
+---
+ tcl/target/max32662.cfg | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+ create mode 100644 tcl/target/max32662.cfg
+
+diff --git a/tcl/target/max32662.cfg b/tcl/target/max32662.cfg
+new file mode 100644
+index 000000000..70f486318
+--- /dev/null
++++ b/tcl/target/max32662.cfg
+@@ -0,0 +1,18 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Maxim Integrated MAX32662 - Arm Cortex-M4F @ 100MHz
++
++# Set the reset pin configuration
++reset_config srst_only
++
++# Set flash parameters
++set FLASH_BASE 0x10000000
++set FLASH_SIZE 0x40000
++set FLC_BASE 0x40029000
++set FLASH_SECTOR 0x2000
++set FLASH_CLK 96
++set FLASH_OPTIONS 0x01
++
++# Use Serial Wire Debug
++transport select swd
++
++source [find target/max32xxx_common.cfg]
+-- 
+2.51.2
+

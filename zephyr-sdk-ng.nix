@@ -1,9 +1,9 @@
-{ stdenv, lib, hostPlatform, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python38, which
-, hidapi, libftdi1, libusb1, overrideOpenocd, cmake, wget, file
-, version ? "0.16.3", toolchains ? "all" }:
+{ stdenv, lib, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python312, which
+, hidapi, libftdi1, libusb1, ncurses, overrideOpenocd ? null, cmake, wget, file
+, version ? "1.0.1", toolchains ? "all" }:
 
 let pname = "zephyr-sdk";
-    system = lib.splitString "-" hostPlatform.system;
+    system = lib.splitString "-" stdenv.hostPlatform.system;
     host = "${lib.elemAt system 1}-${lib.elemAt system 0}";
     base-url = "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${version}/";
     hashes = (import ./zephyr-sdk-hash.nix).${version}.${host};
@@ -11,6 +11,9 @@ let pname = "zephyr-sdk";
       then builtins.trace "All toolchains will be installed. This may take a long..."
              (builtins.attrNames hashes.toolchains)
       else toolchains;
+
+    python = python312;
+    py-ver = "3.12";
 
 in stdenv.mkDerivation {
   inherit pname version;
@@ -28,10 +31,13 @@ in stdenv.mkDerivation {
   sourceRoot = "${pname}-${version}";
 
   nativeBuildInputs = [ autoPatchelfHook makeBinaryWrapper which file cmake wget ];
-  buildInputs = [ xz python38 hidapi libftdi1 libusb1 ];
+  buildInputs = [ xz python hidapi libftdi1 libusb1 ncurses ];
 
   postUnpack = ''
-    mv ${lib.concatStringsSep " " install-toolchains} $sourceRoot
+    mkdir -p $sourceRoot/gnu
+    ${lib.concatMapStringsSep "\n"
+      (toolchain: "mv ${toolchain} ${if toolchain != "llvm" then "$sourceRoot/gnu" else "$sourceRoot"}")
+      install-toolchains}
   '';
 
   dontAutoPatchelf = true;
@@ -41,9 +47,9 @@ in stdenv.mkDerivation {
     find $out -type f -perm -a+x -name '*-py' | while read prog; do
       echo "Wrap python program: $prog"
       wrapProgram $prog \
-        --set NIX_PYTHONPREFIX ${python38} \
-        --set NIX_PYTHONEXECUTABLE ${python38}/bin/python3.8 \
-        --set NIX_PYTHONPATH ${python38}/lib/python3.8/site-packages
+        --set NIX_PYTHONPREFIX ${python} \
+        --set NIX_PYTHONEXECUTABLE ${python}/bin/python${py-ver} \
+        --set NIX_PYTHONPATH ${python}/lib/python${py-ver}/site-packages
     done
   '';
 
@@ -53,7 +59,8 @@ in stdenv.mkDerivation {
     install -d -m0755 $out/zephyr-sdk
     mv * $out/zephyr-sdk
     patchShebangs --host $out/zephyr-sdk
-    (cd $out/zephyr-sdk && ./setup.sh -h ${lib.concatMapStringsSep " " (toolchain: "-t ${toolchain}") install-toolchains})
+    find $out -type d -maxdepth 2
+    (cd $out/zephyr-sdk && ./setup.sh -h ${lib.concatMapStringsSep " " (toolchain: if toolchain == "llvm" then "-l" else "-t ${toolchain}") install-toolchains})
     #find -maxdepth 1 -! -name '*.sh' -exec cp -r {} $out/zephyr-sdk \;
   '' + (lib.optionalString (overrideOpenocd != null) ''
     rm -f $out/zephyr-sdk/sysroots/x86_64-pokysdk-linux/usr/bin/openocd

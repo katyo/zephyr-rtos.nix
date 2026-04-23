@@ -1,0 +1,360 @@
+From 2cad2e0747305fac8fdb1473a6b8f99fcba416b3 Mon Sep 17 00:00:00 2001
+From: Marek Kraus <gamelaster@outlook.com>
+Date: Sat, 23 Nov 2024 15:54:26 +0100
+Subject: [PATCH 20/46] tcl/target: add Bouffalo Lab BL602 and BL702L chip
+ series support
+
+BL602, BL702 and BL702L series of chips are sharing same architecture,
+so they all need same software reset mechanism as well.
+Only difference (in terms of configuration needed for JTAG) are TAP ID,
+workarea address and size. This is addressed by creating bl602_common.cfg
+tcl file, which contains all those common stuff between the chips.
+The script is prefixed by bl602, as this was
+first *publicly* available chip from Bouffalo with this architecture.
+
+This patch also improves reset mechanism. Previous reset mechanism did not
+worked properly when slower JTAG adapter was used (it attached too late).
+New reset mechanism uses various methods to keep CPU in BootROM, until
+the JTAG adapter does not attach again after reset. Additionally,
+we trigger SW Reset by directly using DMI commands to write to register
+with system bus method, to avoid getting error about unsuccessful write.
+The new method works on both FT232H (8MHz JTAG clock) and
+unnamed CMSIS-DAP dongle (1.5MHz JTAG clock).
+
+Change-Id: I5be3694927793fd3f64c9ed4ee6ded2db0d25cae
+Signed-off-by: Marek Kraus <gamelaster@outlook.com>
+Reviewed-on: https://review.openocd.org/c/openocd/+/8593
+Tested-by: jenkins
+Reviewed-by: Antonio Borneo <borneo.antonio@gmail.com>
+---
+ tcl/target/bl602.cfg        |  34 +++++++++
+ tcl/target/bl602_common.cfg | 143 ++++++++++++++++++++++++++++++++++++
+ tcl/target/bl702.cfg        |  59 +++------------
+ tcl/target/bl702l.cfg       |  47 ++++++++++++
+ 4 files changed, 234 insertions(+), 49 deletions(-)
+ create mode 100644 tcl/target/bl602.cfg
+ create mode 100644 tcl/target/bl602_common.cfg
+ create mode 100644 tcl/target/bl702l.cfg
+
+diff --git a/tcl/target/bl602.cfg b/tcl/target/bl602.cfg
+new file mode 100644
+index 000000000..d110d3e3b
+--- /dev/null
++++ b/tcl/target/bl602.cfg
+@@ -0,0 +1,34 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++#
++# Bouffalo Labs BL602 and BL604 target
++#
++# https://en.bouffalolab.com/product/?type=detail&id=1
++#
++# Default JTAG pins: (if not changed by eFuse configuration)
++# TDO - GPIO11
++# TMS - GPIO12
++# TCK - GPIO14
++# TDI - GPIO17
++#
++
++if { [info exists CHIPNAME] } {
++	set BL602_CHIPNAME $CHIPNAME
++} else {
++	set BL602_CHIPNAME bl602
++}
++
++set CPUTAPID 0x20000c05
++
++# For work-area we use DTCM instead of ITCM, due ITCM is used as buffer for L1 cache and XIP
++set WORKAREAADDR 0x42014000
++set WORKAREASIZE 0xC000
++
++source [find target/bl602_common.cfg]
++
++# JTAG reset is broken. Read comment of bl602_sw_reset_hbn_wait function for more information
++$_TARGETNAME configure -event reset-assert {
++	halt
++
++	bl602_sw_reset_hbn_wait
++}
+diff --git a/tcl/target/bl602_common.cfg b/tcl/target/bl602_common.cfg
+new file mode 100644
+index 000000000..cf4bc3947
+--- /dev/null
++++ b/tcl/target/bl602_common.cfg
+@@ -0,0 +1,143 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++# Script for Bouffalo chips with similar architecture used in BL602
++# based on SiFive E21 core
++
++source [find mem_helper.tcl]
++
++transport select jtag
++
++if { [info exists CPUTAPID ] } {
++	set _CPUTAPID $CPUTAPID
++} else {
++	error "you must specify a tap id"
++}
++
++if { [info exists BL602_CHIPNAME] } {
++	set _CHIPNAME $BL602_CHIPNAME
++} else {
++	error "you must specify a chip name"
++}
++
++if { [info exists WORKAREAADDR] } {
++	set _WORKAREAADDR $WORKAREAADDR
++} else {
++	error "you must specify a work area address"
++}
++
++if { [info exists WORKAREASIZE] } {
++	set _WORKAREASIZE $WORKAREASIZE
++} else {
++	error "you must specify a work area size"
++}
++
++jtag newtap $_CHIPNAME cpu -irlen 5 -expected-id $_CPUTAPID
++
++set _TARGETNAME $_CHIPNAME.cpu
++target create $_TARGETNAME riscv -chain-position $_TARGETNAME
++
++riscv set_mem_access sysbus
++riscv set_enable_virt2phys off
++
++$_TARGETNAME configure -work-area-phys $_WORKAREAADDR -work-area-size $_WORKAREASIZE -work-area-backup 1
++
++# Internal RC ticks on 32 MHz, so this speed should be safe to use.
++adapter speed 8000
++
++# Useful functions
++
++set dmcontrol 		0x10
++set dmcontrol_dmactive	[expr {1 << 0}]
++set dmcontrol_ndmreset	[expr {1 << 1}]
++set dmcontrol_resumereq	[expr {1 << 30}]
++set dmcontrol_haltreq	[expr {1 << 31}]
++
++proc bl602_restore_clock_defaults { } {
++	# Switch clock to internal RC32M
++	# In HBN_GLB, set ROOT_CLK_SEL = 0
++	mmw 0x4000f030 0x0 0x00000003
++	# Wait for clock switch
++	sleep 10
++
++	# GLB_REG_BCLK_DIS_FALSE
++	mww 0x40000ffc 0x0
++
++	# HCLK is RC32M, so BCLK/HCLK doesn't need divider
++	# In GLB_CLK_CFG0, set BCLK_DIV = 0 and HCLK_DIV = 0
++	mmw 0x40000000 0x0 0x00FFFF00
++	# Wait for clock to stabilize
++	sleep 10
++}
++
++# By spec, ndmreset should reset whole chip. This implementation resets only few parts of the chip.
++# CTRL_PWRON_RESET register in GLB core triggers full "power-on like" reset, so we use it instead
++# for full software reset.
++proc bl602_sw_reset { } {
++	# In GLB_SWRST_CFG2, clear CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET
++	mmw 0x40000018 0x0 0x00000007
++
++	# This Software reset method resets everything, so CPU as well.
++	# It does that in not much good way, resulting in Debug Module being reset as well.
++	# This also means, that right after CPU and Debug Module are turned on, we need to
++	# enable Debug Module and halt CPU if needed. Additionally, we trigger this SW reset
++	# through system bus access directly with DMI commands, to avoid errors printed by
++	# OpenOCD about unsuccessful register write.
++
++	# In GLB_SWRST_CFG2, set CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET to 1
++	riscv dmi_write 0x39 0x40000018
++	riscv dmi_write 0x3c 0x7
++
++	# We need to wait for chip to finish reset and execute BootROM
++	sleep 1
++
++	# JTAG Debug Transport Module is reset as well, so we need to get into RUN/IDLE state
++	runtest 10
++
++	# We need to enable Debug Module and halt the CPU, so we can reset Program Counter
++	# and to do additional clean-ups. If reset was called without halt, resume is handled
++	# by reset-deassert-post event handler.
++
++	# In Debug Module Control (dmcontrol), set dmactive to 1 and then haltreq to 1
++	riscv dmi_write $::dmcontrol $::dmcontrol_dmactive
++	riscv dmi_write $::dmcontrol [ expr {$::dmcontrol_dmactive | $::dmcontrol_haltreq} ]
++
++	# Set Program Counter to start of BootROM
++	set_reg {pc 0x21000000}
++}
++
++# On BL602 and BL702, the only way to force chip stay in BootROM (until JTAG attaches)
++# is by putting infinity loop into HBN RAM (which is not reset by sw reset), and then
++# configure HBN registers, which will cause BootROM to jump into our code early in BootROM.
++proc bl602_sw_reset_hbn_wait {} {
++	# Restore clocks to defaults
++	bl602_restore_clock_defaults
++
++	# In HBN RAM, write infinity loop instruction
++	# beq zero, zero, 0
++	mww 0x40010000 0x00000063
++	# In HNB, set HBN_RSV0 (Status Flag) to "EHBN" (as uint32_t)
++	mww 0x4000f100 0x4e424845
++	# In HBN, set HBN_RSV1 (WakeUp Address) to HBN RAM address
++	mww 0x4000f104 0x40010000
++
++	# Perform software reset
++	bl602_sw_reset
++
++	# Clear HBN RAM, HBN_RSV0 and HBN_RSV1
++	mww 0x40010000 0x00000000
++	mww 0x4000f100 0x00000000
++	mww 0x4000f104 0x00000000
++
++	# This early jump method locks up BootROM through Trust Zone Controller.
++	# That means any read of BootROM returns 0xDEADBEEF.
++	# Only way to reset it, is through JTAG Reset, thus toggling ndmreset in dmcontrol.
++	riscv dmi_write $::dmcontrol [ expr {$::dmcontrol_dmactive | $::dmcontrol_ndmreset} ]
++	riscv dmi_write $::dmcontrol [ expr {$::dmcontrol_dmactive} ]
++}
++
++$_TARGETNAME configure -event reset-deassert-post {
++	# Resume the processor if reset was triggered without halt request
++	if {$halt == 0} {
++		riscv dmi_write $::dmcontrol [ expr {$::dmcontrol_dmactive | $::dmcontrol_resumereq} ]
++	}
++}
+diff --git a/tcl/target/bl702.cfg b/tcl/target/bl702.cfg
+index 5046cd189..8caf06ebe 100644
+--- a/tcl/target/bl702.cfg
++++ b/tcl/target/bl702.cfg
+@@ -12,62 +12,23 @@
+ # TDO - GPIO9
+ #
+ 
+-source [find mem_helper.tcl]
+-
+-transport select jtag
+-
+ if { [info exists CHIPNAME] } {
+-	set _CHIPNAME $CHIPNAME
++	set BL602_CHIPNAME $CHIPNAME
+ } else {
+-	set _CHIPNAME bl702
++	set BL602_CHIPNAME bl702
+ }
+ 
+-jtag newtap $_CHIPNAME cpu -irlen 5 -expected-id 0x20000e05
+-
+-set _TARGETNAME $_CHIPNAME.cpu
+-target create $_TARGETNAME riscv -chain-position $_TARGETNAME
+-
+-riscv set_mem_access sysbus
++set CPUTAPID 0x20000e05
+ 
+-$_TARGETNAME configure -work-area-phys 0x22020000 -work-area-size 0x10000 -work-area-backup 1
++# For work-area we use DTCM instead of ITCM, due ITCM is used as buffer for L1 cache and XIP
++set WORKAREAADDR 0x22014000
++set WORKAREASIZE 0xC000
+ 
+-# Internal RC ticks on 32 MHz, so this speed should be safe to use.
+-adapter speed 4000
++source [find target/bl602_common.cfg]
+ 
+-# Debug Module's ndmreset resets only Trust Zone Controller, so we need to do SW reset instead.
+-# CTRL_PWRON_RESET triggers full "power-on like" reset.
+-# This means that pinmux configuration to access JTAG is reset as well, and configured back early
+-# in BootROM.
+-$_TARGETNAME configure -event reset-assert-pre {
++# JTAG reset is broken. Read comment of bl602_sw_reset_hbn_wait function for more information
++$_TARGETNAME configure -event reset-assert {
+ 	halt
+ 
+-	# Switch clock to internal RC32M
+-	# In HBN_GLB, set ROOT_CLK_SEL = 0
+-	mmw 0x4000f030 0x0 0x00000003
+-	# Wait for clock switch
+-	sleep 10
+-
+-	# GLB_REG_BCLK_DIS_FALSE
+-	mww 0x40000ffc 0x0
+-
+-	# HCLK is RC32M, so BCLK/HCLK doesn't need divider
+-	# In GLB_CLK_CFG0, set BCLK_DIV = 0 and HCLK_DIV = 0
+-	mmw 0x40000000 0x0 0x00FFFF00
+-	# Wait for clock to stabilize
+-	sleep 10
+-
+-	# Do reset
+-	# In GLB_SWRST_CFG2, clear CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET
+-	mmw 0x40000018 0x0 0x00000007
+-
+-	# Since this full software reset resets GPIO pinmux as well, we will lose access
+-	# to JTAG right away after writing to register. This chip doesn't support abstract
+-	# memory access, so when this is done by progbuf or sysbus, OpenOCD will fail to read
+-	# if write was successful or not, and will print error about that. Since receiving of
+-	# this error is expected, we will turn off log printing for a moment,
+-	set lvl [lindex [debug_level] 1]
+-	debug_level -1
+-	# In GLB_SWRST_CFG2, set CTRL_SYS_RESET, CTRL_CPU_RESET and CTRL_PWRON_RESET to 1
+-	catch {mmw 0x40000018 0x7 0x0}
+-	debug_level $lvl
++	bl602_sw_reset_hbn_wait
+ }
+diff --git a/tcl/target/bl702l.cfg b/tcl/target/bl702l.cfg
+new file mode 100644
+index 000000000..467dd8ce6
+--- /dev/null
++++ b/tcl/target/bl702l.cfg
+@@ -0,0 +1,47 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++
++#
++# Bouffalo Labs BL702L and BL704L target
++#
++# https://en.bouffalolab.com/product/?type=detail&id=26
++#
++# Default JTAG pins: (if not changed by eFuse configuration)
++# TMS - GPIO0
++# TDI - GPIO1
++# TCK - GPIO2
++# TDO - GPIO7
++#
++
++if { [info exists CHIPNAME] } {
++	set BL602_CHIPNAME $CHIPNAME
++} else {
++	set BL602_CHIPNAME bl702l
++}
++
++set CPUTAPID 0x20000e05
++
++# For work-area we use beginning of OCRAM, since BL702L have only ITCM, which can be taken
++# by L1 cache and XIP during runtime.
++set WORKAREAADDR 0x42020000
++set WORKAREASIZE 0x10000
++
++source [find target/bl602_common.cfg]
++
++# JTAG reset is broken. Read comment of bl602_sw_reset function for more information
++# On BL702L, we are forcing boot into ISP mode, so chip stays in BootROM until JTAG re-attach
++$_TARGETNAME configure -event reset-assert {
++	halt
++
++	# Restore clocks to defaults
++	bl602_restore_clock_defaults
++
++	# In HBN_RSV2, set HBN_RELEASE_CORE to HBN_RELEASE_CORE_FLAG (4)
++	# and HBN_USER_BOOT_SEL to 1 (ISP)
++	mww 0x4000f108 0x44000000
++
++	# Perform software reset
++	bl602_sw_reset
++
++	# Reset HBN_RSV2 so BootROM will not force ISP mode again
++	mww 0x4000f108 0x00000000
++}
+-- 
+2.51.2
+

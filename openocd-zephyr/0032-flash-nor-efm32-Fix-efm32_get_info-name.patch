@@ -1,0 +1,41 @@
+From 7f562242f6710cb259b64092a279f70370c89122 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?J=C3=A9r=C3=B4me=20Pouiller?= <jerome.pouiller@silabs.com>
+Date: Wed, 28 Jan 2026 10:50:10 +0100
+Subject: [PATCH 32/46] flash/nor/efm32: Fix efm32_get_info() name
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+get_efm32_info() was the only function that does not follow the name scheme
+of the file.
+
+Signed-off-by: Jérôme Pouiller <jerome.pouiller@silabs.com>
+Change-Id: I5eea00ff0f06ba5d7d7cb4f9b1fb4394a5f36e20
+---
+ src/flash/nor/efm32.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/flash/nor/efm32.c b/src/flash/nor/efm32.c
+index 3859aaad8..5bbda1106 100644
+--- a/src/flash/nor/efm32.c
++++ b/src/flash/nor/efm32.c
+@@ -1137,7 +1137,7 @@ static int efm32_protect_check(struct flash_bank *bank)
+ 	return ERROR_OK;
+ }
+ 
+-static int get_efm32_info(struct flash_bank *bank, struct command_invocation *cmd)
++static int efm32_get_info(struct flash_bank *bank, struct command_invocation *cmd)
+ {
+ 	struct efm32_flash_chip *efm32_info = bank->driver_priv;
+ 	int ret;
+@@ -1224,6 +1224,6 @@ const struct flash_driver efm32_flash = {
+ 	.auto_probe         = efm32_auto_probe,
+ 	.erase_check        = default_flash_blank_check,
+ 	.protect_check      = efm32_protect_check,
+-	.info               = get_efm32_info,
++	.info               = efm32_get_info,
+ 	.free_driver_priv   = efm32_free_driver_priv,
+ };
+-- 
+2.51.2
+

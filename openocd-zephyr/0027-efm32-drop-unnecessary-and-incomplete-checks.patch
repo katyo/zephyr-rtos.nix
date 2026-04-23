@@ -1,0 +1,43 @@
+From 59154ed95e3ff201bd71cc7f49232f1a40fdde7d Mon Sep 17 00:00:00 2001
+From: Karl Palsson <karlp@tweak.au>
+Date: Wed, 2 Aug 2023 21:33:32 +0000
+Subject: [PATCH 27/46] efm32: drop unnecessary and incomplete checks
+
+There's really no reason to try and add an extra layer of cpu
+verification here.
+
+Change-Id: If8c4aa03754607be6c089f514ae300b09b067ffa
+Signed-off-by: Karl Palsson <karlp@tweak.au>
+Reviewed-on: https://review.openocd.org/c/openocd/+/7844
+Tested-by: jenkins
+Reviewed-by: Antonio Borneo <borneo.antonio@gmail.com>
+---
+ src/flash/nor/efm32.c | 12 ------------
+ 1 file changed, 12 deletions(-)
+
+diff --git a/src/flash/nor/efm32.c b/src/flash/nor/efm32.c
+index 3a49afc9c..f8e088657 100644
+--- a/src/flash/nor/efm32.c
++++ b/src/flash/nor/efm32.c
+@@ -251,18 +251,6 @@ static int efm32x_read_info(struct flash_bank *bank)
+ 
+ 	memset(efm32_info, 0, sizeof(struct efm32_info));
+ 
+-	const struct cortex_m_common *cortex_m = target_to_cm(bank->target);
+-
+-	switch (cortex_m->core_info->partno) {
+-	case CORTEX_M3_PARTNO:
+-	case CORTEX_M4_PARTNO:
+-	case CORTEX_M0P_PARTNO:
+-		break;
+-	default:
+-		LOG_ERROR("Target is not Cortex-Mx Device");
+-		return ERROR_FAIL;
+-	}
+-
+ 	ret = efm32x_get_flash_size(bank, &(efm32_info->flash_sz_kib));
+ 	if (ret != ERROR_OK)
+ 		return ret;
+-- 
+2.51.2
+

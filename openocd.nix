@@ -1,19 +1,27 @@
-{ stdenv
-, lib
-, fetchurl
-, pkg-config
-, hidapi
-, jimtcl
-, libjaylink
-, libusb1
-, libgpiod
+{
+  stdenv,
+  lib,
+  fetchurl,
+  pkg-config,
+  hidapi,
+  tcl,
+  jimtcl,
+  libjaylink,
+  libusb1,
+  libgpiod_1,
 
-, enableFtdi ? true, libftdi1
+  enableFtdi ? true,
+  libftdi1,
 
-# Allow selection the hardware targets (SBCs, JTAG Programmers, JTAG Adapters)
-, extraHardwareSupport ? []
+  # Allow selection the hardware targets (SBCs, JTAG Programmers, JTAG Adapters)
+  extraHardwareSupport ? [ ],
 }:
+let
 
+  isWindows = stdenv.hostPlatform.isWindows;
+  notWindows = !isWindows;
+
+in
 stdenv.mkDerivation rec {
   pname = "openocd";
   version = "0.12.0";
@@ -22,33 +30,49 @@ stdenv.mkDerivation rec {
     sha256 = "sha256-ryVHiL6Yhh8r2RA/5uYKd07Jaow3R0Tu+Rl/YEMHWvo=";
   };
 
-  nativeBuildInputs = [ pkg-config ];
+  nativeBuildInputs = [
+    pkg-config
+    tcl
+  ];
 
-  buildInputs = [ hidapi jimtcl libftdi1 libjaylink libusb1 ]
-    ++ lib.optional stdenv.isLinux libgpiod;
+  buildInputs = [
+    libusb1
+  ]
+  ++ lib.optionals notWindows [
+    hidapi
+    jimtcl
+    libftdi1
+    libjaylink
+  ]
+  ++
+    # tracking issue for v2 api changes https://sourceforge.net/p/openocd/tickets/306/
+    lib.optional stdenv.hostPlatform.isLinux libgpiod_1;
 
   configureFlags = [
     "--disable-werror"
-    "--disable-internal-jimtcl"
-    "--disable-internal-libjaylink"
     "--enable-jtag_vpi"
-    "--enable-buspirate"
     "--enable-remote-bitbang"
-    (lib.enableFeature enableFtdi "ftdi")
-    (lib.enableFeature stdenv.isLinux "linuxgpiod")
-    (lib.enableFeature stdenv.isLinux "sysfsgpio")
-  ] ++
-    map (hardware: "--enable-${hardware}") extraHardwareSupport
-  ;
+    (lib.enableFeature notWindows "buspirate")
+    (lib.enableFeature (notWindows && enableFtdi) "ftdi")
+    (lib.enableFeature stdenv.hostPlatform.isLinux "linuxgpiod")
+    (lib.enableFeature stdenv.hostPlatform.isLinux "sysfsgpio")
+    (lib.enableFeature isWindows "internal-jimtcl")
+    (lib.enableFeature isWindows "internal-libjaylink")
+  ]
+  ++ map (hardware: "--enable-${hardware}") extraHardwareSupport;
 
   enableParallelBuilding = true;
 
-  env.NIX_CFLAGS_COMPILE = toString (lib.optionals stdenv.cc.isGNU [
-    "-Wno-error=cpp"
-    "-Wno-error=strict-prototypes" # fixes build failure with hidapi 0.10.0
-  ]);
+  doInstallCheck = true;
 
-  postInstall = lib.optionalString stdenv.isLinux ''
+  env.NIX_CFLAGS_COMPILE = toString (
+    lib.optionals stdenv.cc.isGNU [
+      "-Wno-error=cpp"
+      "-Wno-error=strict-prototypes" # fixes build failure with hidapi 0.10.0
+    ]
+  );
+
+  postInstall = lib.optionalString stdenv.hostPlatform.isLinux ''
     mkdir -p "$out/etc/udev/rules.d"
     rules="$out/share/openocd/contrib/60-openocd.rules"
     if [ ! -f "$rules" ]; then
@@ -58,8 +82,9 @@ stdenv.mkDerivation rec {
     ln -s "$rules" "$out/etc/udev/rules.d/"
   '';
 
-  meta = with lib; {
+  meta = {
     description = "Free and Open On-Chip Debugging, In-System Programming and Boundary-Scan Testing";
+    mainProgram = "openocd";
     longDescription = ''
       OpenOCD provides on-chip programming and debugging support with a layered
       architecture of JTAG interface and TAP support, debug target support
@@ -70,8 +95,11 @@ stdenv.mkDerivation rec {
       GNU GDB program.
     '';
     homepage = "https://openocd.sourceforge.net/";
-    license = licenses.gpl2Plus;
-    maintainers = with maintainers; [ bjornfor prusnak ];
-    platforms = platforms.unix;
+    license = lib.licenses.gpl2Plus;
+    maintainers = with lib.maintainers; [
+      bjornfor
+      prusnak
+    ];
+    platforms = lib.platforms.unix ++ lib.platforms.windows;
   };
 }
