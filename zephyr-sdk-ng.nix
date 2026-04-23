@@ -1,5 +1,5 @@
-{ stdenv, lib, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python312, which
-, hidapi, libftdi1, libusb1, ncurses, overrideOpenocd ? null, cmake, wget, file
+{ stdenv, lib, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python310, python312, which
+, hidapi, libftdi1, libusb1, ncurses, libxcrypt-legacy, overrideOpenocd ? null, cmake, wget, file
 , version ? "1.0.1", toolchains ? "all" }:
 
 let pname = "zephyr-sdk";
@@ -12,8 +12,11 @@ let pname = "zephyr-sdk";
              (builtins.attrNames hashes.toolchains)
       else toolchains;
 
-    python = python312;
-    py-ver = "3.12";
+    version_major = builtins.elemAt (builtins.splitVersion version) 0;
+    is_ng = version_major != "0";
+
+    python = if is_ng then python312 else python310;
+    py-ver = if is_ng then "3.12" else "3.10";
 
 in stdenv.mkDerivation {
   inherit pname version;
@@ -31,12 +34,12 @@ in stdenv.mkDerivation {
   sourceRoot = "${pname}-${version}";
 
   nativeBuildInputs = [ autoPatchelfHook makeBinaryWrapper which file cmake wget ];
-  buildInputs = [ xz python hidapi libftdi1 libusb1 ncurses ];
+  buildInputs = [ xz python hidapi libftdi1 libusb1 ncurses libxcrypt-legacy ];
 
   postUnpack = ''
-    mkdir -p $sourceRoot/gnu
+    ${lib.optionalString is_ng "mkdir -p $sourceRoot/gnu"}
     ${lib.concatMapStringsSep "\n"
-      (toolchain: "mv ${toolchain} ${if toolchain != "llvm" then "$sourceRoot/gnu" else "$sourceRoot"}")
+      (toolchain: "mv ${toolchain} ${if is_ng && toolchain != "llvm" then "$sourceRoot/gnu" else "$sourceRoot"}")
       install-toolchains}
   '';
 

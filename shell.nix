@@ -1,7 +1,7 @@
-{ pkgs ? import ./packages.nix {}, inputs ? [], toolchains ? "all", ... }:
+{ pkgs ? import ./packages.nix {}, version ? "1.0.1", inputs ? [], toolchains ? "all", ... }:
 
 let zephyr-sdk = pkgs.zephyr-sdk.override {
-      inherit toolchains;
+      inherit version toolchains;
     };
 
 in pkgs.gccMultiStdenv.mkDerivation {

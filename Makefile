@@ -1,4 +1,6 @@
 versions ?= \
+  0.16.9 \
+  0.17.4 \
   1.0.0 \
   1.0.1
 
@@ -78,6 +80,10 @@ toolchain_file = toolchain_$(1)_$(2)$(if $(3),_$(3),)
 # args: func(version, host, toolchain)
 foreach_all = $(foreach version,$(versions),$(foreach host,$(hosts),$(foreach toolchain,$(toolchains),$(call $(1),$(version),$(host),$(toolchain)))))
 
+# version
+version_major = $(word 1,$(subst ., ,$(1)))
+is_ng = $(filter 1,$(call version_major,$(1)))
+
 # args: version, algo
 define fetch-hash-rules
 fetch-hash: fetch-hash-$(1)-$(2)
@@ -122,8 +128,11 @@ $(call put_hash,      ,hosttools,$(1),$(call hosttools_file,$(2)))\
 $(call put_hash,      ,full,$(1),$(call sdk_full_file,$(1),$(2)))\
 $(call put_hash,      ,minimal,$(1),$(call sdk_min_file,$(1),$(2)))
       toolchains = {\
+$(if $(call is_ng,$(1)),\
 $(call put_hash,        ,"llvm",$(1),$(call toolchain_file,llvm,$(2)))\
-$(foreach arch,$(archs),$(call put_hash,        ,\"$(arch)\",$(1),$(call toolchain_file,gnu,$(2),$(arch))))
+$(foreach arch,$(archs),$(call put_hash,        ,\"$(arch)\",$(1),$(call toolchain_file,gnu,$(2),$(arch)))),\
+$(foreach arch,$(archs),$(call put_hash,        ,\"$(arch)\",$(1),$(call toolchain_file,$(2),$(arch))))\
+)
       };
     };
 endef
