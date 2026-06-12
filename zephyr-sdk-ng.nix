@@ -1,4 +1,4 @@
-{ stdenv, lib, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python310, python312, which
+{ stdenv, lib, fetchurl, autoPatchelfHook, makeBinaryWrapper, xz, python311, python312, which
 , hidapi, libftdi1, libusb1, ncurses, libxcrypt-legacy, overrideOpenocd ? null, cmake, wget, file
 , version ? "1.0.1", toolchains ? "all" }:
 
@@ -15,7 +15,7 @@ let pname = "zephyr-sdk";
     version_major = builtins.elemAt (builtins.splitVersion version) 0;
     is_ng = version_major != "0";
 
-    python = if is_ng then python312 else python310;
+    python = if is_ng then python312 else python311;
     py-ver = if is_ng then "3.12" else "3.10";
 
 in stdenv.mkDerivation {
@@ -45,6 +45,13 @@ in stdenv.mkDerivation {
 
   dontAutoPatchelf = true;
   postFixup = ''
+    ${lib.optionalString (!is_ng) ''
+      find $out -type f -perm -a+x -name '*-py' | while read prog; do
+        echo "Patch python program: $prog"
+        patchelf --replace-needed libpython3.10.so.1.0 libpython3.11.so.1.0 $prog || true
+      done
+    ''}
+
     autoPatchelf $(find $out/zephyr-sdk -mindepth 1 -maxdepth 1 -type d -not -name sysroots)
 
     find $out -type f -perm -a+x -name '*-py' | while read prog; do
