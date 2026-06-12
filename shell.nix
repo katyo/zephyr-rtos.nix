@@ -46,35 +46,50 @@ in pkgs.gccMultiStdenv.mkDerivation {
   ZEPHYR_SDK_INSTALL_DIR = "${zephyr-sdk}/zephyr-sdk";
 
   shellHook = ''
-    if [ -d .west ]
-    then
-      echo 'Workspace already initialized...'
-    else
-      west init
-      west update
-    fi
-    if [ -d .venv ]
-    then
-      echo 'Virtual env already initialized...'
-      source .venv/bin/activate
-    else
-      python -m venv .venv
-      source .venv/bin/activate
-      pip install -r zephyr/scripts/requirements.txt
-      pip install git+https://github.com/HBehrens/puncover
-      autoPatchelf .venv
-    fi
-    source <(west completion bash)
+    _prepareZephyr() {
+      source <(west completion bash)
+      echo 'Zephyr workspace successfully configured.'
+      echo
+      echo 'You can try build and run demo:'
+      echo '  west build -p auto -b qemu_x86 zephyr/samples/hello_world'
+      echo '  west build -t run'
+    }
+    _initialZephyr() {
+      echo 'You need install Zephyr to continue:'
+      echo '  prepareZephyr'
+    }
+    prepareZephyr() {
+      if [ -d .west ]
+      then
+        echo 'Workspace already initialized...'
+      else
+        west init
+        west update
+      fi
+      if [ -d .venv ]
+      then
+        echo 'Virtual env already initialized...'
+        source .venv/bin/activate
+      else
+        python -m venv .venv
+        source .venv/bin/activate
+        pip install -r zephyr/scripts/requirements.txt
+        pip install git+https://github.com/HBehrens/puncover
+        autoPatchelf .venv
+      fi
+      prepareZephyr
+    }
     echo
     echo '__              '
     echo ' / _ ._ |_   ._ '
     echo '/_(/_|_)| |\/|  '
     echo '     |     /    '
     echo
-    echo 'Zephyr workspace successfully configured.'
-    echo
-    echo 'You can try build and run demo:'
-    echo '  west build -p auto -b qemu_x86 zephyr/samples/hello_world'
-    echo '  west build -t run'
+    if [ -d .west -a -d .venv ]
+    then
+      _prepareZephyr
+    else
+      _initialZephyr
+    fi
   '';
 }
